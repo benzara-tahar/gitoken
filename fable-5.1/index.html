@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gitoken — notch notification companion (prototype)</title>
+<style>
+/* ---------- tokens ---------- */
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Inter, system-ui, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", monospace;
+  --menubar-h: 36px;
+  --notch-w: 196px;
+  --top-h: 36px;
+  --isl-dur: 340ms;
+  --isl-ease: cubic-bezier(.22, .8, .26, 1);
+  --fade-dur: 220ms;
+  --success: #34c759; --danger: #ff3b30; --warn: #ff9f0a; --purple: #af52de;
+}
+.motion-elastic { --isl-dur: 580ms; --isl-ease: cubic-bezier(.3, 1.38, .38, 1); --fade-dur: 240ms; }
+.motion-reduced { --isl-dur: 0ms; --fade-dur: 0ms; }
+
+.app-calm {
+  --surf: rgba(247, 247, 249, .84);
+  --surf-elev: #fff;
+  --surf-blur: blur(30px) saturate(1.8);
+  --surf-border: rgba(0, 0, 0, .09);
+  --surf-shadow: 0 18px 50px rgba(0, 0, 0, .24), 0 1px 4px rgba(0, 0, 0, .08);
+  --text: #1d1d1f; --text-2: #6e6e73; --text-3: #aeaeb2;
+  --line: rgba(0, 0, 0, .07); --hover: rgba(0, 0, 0, .05);
+  --accent: #0a7aff; --accent-soft: rgba(10, 122, 255, .13);
+  --code-bg: rgba(0, 0, 0, .045);
+  --radius: 16px; --row-radius: 10px;
+  --notch-color: #000;
+  --field: rgba(255, 255, 255, .7);
+}
+.app-fluid {
+  --surf: #0a0a0d;
+  --surf-elev: #26262c;
+  --surf-blur: none;
+  --surf-border: rgba(255, 255, 255, .09);
+  --surf-shadow: 0 26px 70px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .05);
+  --text: #f4f4f6; --text-2: #9d9da6; --text-3: #5c5c66;
+  --line: rgba(255, 255, 255, .08); --hover: rgba(255, 255, 255, .07);
+  --accent: #6ea0ff; --accent-soft: rgba(110, 160, 255, .18);
+  --code-bg: rgba(255, 255, 255, .055);
+  --radius: 28px; --row-radius: 14px;
+  --notch-color: #0a0a0d;
+  --field: rgba(255, 255, 255, .06);
+}
+.notch-hardware { --top-text: #fff; --top-bg: var(--notch-color); }
+.notch-pill { --menubar-h: 28px; --top-text: var(--text); --top-bg: transparent; --notch-w: 0px; }
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { font-family: var(--font); background: #0b0b12; overflow: hidden; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+button { font-family: inherit; }
+button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+svg { display: block; }
+.ico { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ico.s12 { width: 12px; height: 12px; }
+.ico.s16 { width: 16px; height: 16px; }
+.ico.fill { fill: currentColor; stroke: none; }
+
+/* ---------- desktop ---------- */
+.desktop { position: fixed; inset: 0; overflow: hidden; }
+.wallpaper {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(55% 70% at 18% 18%, rgba(255, 150, 92, .95) 0%, rgba(255, 150, 92, 0) 60%),
+    radial-gradient(45% 60% at 82% 24%, rgba(132, 92, 255, .9) 0%, rgba(132, 92, 255, 0) 62%),
+    radial-gradient(60% 65% at 60% 95%, rgba(49, 128, 246, .95) 0%, rgba(49, 128, 246, 0) 62%),
+    radial-gradient(40% 50% at 8% 88%, rgba(255, 92, 138, .85) 0%, rgba(255, 92, 138, 0) 60%),
+    radial-gradient(35% 45% at 50% 50%, rgba(255, 210, 160, .35) 0%, rgba(255, 210, 160, 0) 60%),
+    linear-gradient(160deg, #241446 0%, #15213f 55%, #0b1b3a 100%);
+}
+.wallpaper::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, .08) 50%, rgba(255, 255, 255, 0) 60%);
+}
+
+.menubar {
+  position: absolute; top: 0; left: 0; right: 0; height: var(--menubar-h); z-index: 10;
+  background: rgba(255, 255, 255, .16); backdrop-filter: blur(40px) saturate(1.6); -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  color: #fff; font-size: 13px; display: flex; align-items: center; padding: 0 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .25); user-select: none;
+  transition: height var(--isl-dur) var(--isl-ease);
+}
+.menubar .left, .menubar .right { display: flex; align-items: center; gap: 18px; }
+.menubar .right { margin-left: auto; gap: 14px; }
+.menubar .app { font-weight: 700; }
+.menubar .apple svg { width: 15px; height: 15px; fill: #fff; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .25)); }
+.menubar .right svg { width: 16px; height: 16px; fill: #fff; }
+.menubar .clock { font-variant-numeric: tabular-nums; }
+.menubar .right .tray { display: flex; gap: 12px; align-items: center; }
+
+/* editor window */
+.editor {
+  position: absolute; top: calc(var(--menubar-h) + 36px); left: 9%; right: 9%; bottom: 62px;
+  border-radius: 12px; background: #1d1e23; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .06), inset 0 0 0 1px rgba(255, 255, 255, .02);
+  color: #8e94a3; font-size: 12px; opacity: .97;
+}
+.editor .titlebar { height: 38px; display: flex; align-items: center; padding: 0 12px; background: #24252b; border-bottom: 1px solid rgba(0, 0, 0, .4); position: relative; }
+.editor .tl { display: flex; gap: 8px; }
+.editor .tl i { width: 12px; height: 12px; border-radius: 50%; display: block; opacity: .9; }
+.editor .tl i:nth-child(1) { background: #ff5f57; } .editor .tl i:nth-child(2) { background: #febc2e; } .editor .tl i:nth-child(3) { background: #28c840; }
+.editor .wtitle { position: absolute; left: 0; right: 0; text-align: center; font-size: 12.5px; color: #9ba0ad; pointer-events: none; }
+.editor .wtitle b { color: #c5c9d3; font-weight: 500; }
+.editor .main { flex: 1; display: flex; min-height: 0; }
+.editor .tree { width: 212px; background: #1a1b20; border-right: 1px solid rgba(0, 0, 0, .35); padding: 10px 0; font-size: 12px; }
+.editor .tree .hd { padding: 2px 14px 8px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: #5f6573; }
+.editor .tree div { padding: 3px 14px; white-space: nowrap; color: #8b909d; }
+.editor .tree .d1 { padding-left: 26px; } .editor .tree .d2 { padding-left: 38px; } .editor .tree .d3 { padding-left: 50px; }
+.editor .tree .act { background: rgba(255, 255, 255, .06); color: #d5d8e0; }
+.editor .tree .dim { color: #5f6573; }
+.editor .codewrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.editor .tabs { height: 34px; display: flex; background: #1a1b20; border-bottom: 1px solid rgba(0, 0, 0, .35); }
+.editor .tab { padding: 0 16px; display: flex; align-items: center; font-size: 12px; color: #6f7482; border-right: 1px solid rgba(0, 0, 0, .3); }
+.editor .tab.act { background: #1d1e23; color: #d0d4dd; box-shadow: inset 0 2px 0 #5b7cff; }
+.editor pre { margin: 0; padding: 14px 0; font: 12px/1.6 var(--mono); overflow: hidden; flex: 1; color: #a9aebb; }
+.editor pre .l { display: flex; }
+.editor pre .l .n { width: 48px; text-align: right; padding-right: 18px; color: #4b5060; user-select: none; flex: none; }
+.editor pre .l.cur { background: rgba(255, 255, 255, .035); }
+.editor pre i { font-style: normal; }
+.editor pre .k { color: #b58ee6; } .editor pre .s { color: #93c47d; } .editor pre .c { color: #5c6370; } .editor pre .n2 { color: #e5a76b; } .editor pre .f { color: #7fb3e6; }
+.editor .status { height: 24px; background: #24252b; border-top: 1px solid rgba(0, 0, 0, .4); display: flex; align-items: center; gap: 18px; padding: 0 12px; font-size: 11px; color: #777d8c; }
+.editor .status .r { margin-left: auto; display: flex; gap: 18px; }
+
+/* ---------- island ---------- */
+.island-wrap {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 60;
+  width: var(--isl-w, 196px);
+  --top-w: 196px; --body-w: 0px; --body-h: 0px; --isl-h: 36px;
+}
+.notch-pill .island-wrap { top: 40px; }
+.island { position: relative; width: 100%; display: flex; flex-direction: column; align-items: center; color: var(--text); }
+.island.unified {
+  background: var(--surf); backdrop-filter: var(--surf-blur); -webkit-backdrop-filter: var(--surf-blur);
+  overflow: hidden; height: var(--isl-h);
+  border-radius: 0 0 14px 14px;
+  transition: width var(--isl-dur) var(--isl-ease), height var(--isl-dur) var(--isl-ease), border-radius var(--isl-dur) var(--isl-ease), box-shadow var(--fade-dur) ease;
+}
+.island.unified.open { border-radius: 0 0 var(--radius) var(--radius); box-shadow: var(--surf-shadow); }
+.notch-pill .island.unified { border-radius: 18px; border: 1px solid var(--surf-border); box-shadow: var(--surf-shadow); }
+.notch-pill .island.unified.open { border-radius: 22px; }
+
+.fillet { position: absolute; top: 0; width: 10px; height: 10px; pointer-events: none; display: none; transition: left var(--isl-dur) var(--isl-ease), right var(--isl-dur) var(--isl-ease); }
+.notch-hardware .fillet { display: block; }
+.fillet.fl { left: calc(50% - var(--top-w) / 2 - 10px); background: radial-gradient(circle at 0 100%, transparent 9.5px, var(--notch-color) 10px); }
+.fillet.fr { right: calc(50% - var(--top-w) / 2 - 10px); background: radial-gradient(circle at 100% 100%, transparent 9.5px, var(--notch-color) 10px); }
+
+.island-top {
+  position: relative; height: var(--top-h); width: var(--top-w); flex: none;
+  display: grid; grid-template-columns: 1fr var(--notch-w) 1fr; align-items: center;
+  background: var(--top-bg); color: var(--top-text); cursor: pointer; user-select: none;
+  border-radius: 0 0 12px 12px;
+  transition: width var(--isl-dur) var(--isl-ease), border-radius var(--isl-dur) var(--isl-ease);
+}
+.island.unified .island-top { width: 100%; background: transparent; border-radius: 0; }
+.notch-pill .island-top { grid-template-columns: auto 0 auto; justify-content: space-between; height: 34px; }
+.wing { height: 100%; overflow: hidden; display: flex; align-items: center; }
+.wing-l { justify-self: start; } .wing-r { justify-self: end; }
+.wing-inner { display: flex; align-items: center; gap: 6px; width: max-content; height: 100%; padding: 0 10px; }
+.wing-inner:empty { padding: 0; }
+.notch-hardware .wing-inner { padding: 0 11px; }
+.glyph { color: var(--top-text); opacity: .8; display: flex; }
+.notch-hardware .glyph { opacity: .75; }
+.count {
+  min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--accent); color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+}
+.count.bump { animation: bump 360ms var(--isl-ease); }
+.app-fluid .count { background: #fff; color: #000; }
+.notch-pill.app-calm .count { background: var(--accent); }
+.wing .hint { font-size: 12px; font-weight: 500; opacity: .85; }
+.wing .quiet { color: var(--top-text); opacity: .7; display: flex; }
+@keyframes bump { 40% { transform: scale(1.3); } }
+
+.island-body {
+  position: relative; width: var(--body-w); height: var(--body-h); overflow: hidden; display: flex; justify-content: center; align-items: flex-start;
+  background: var(--surf); backdrop-filter: var(--surf-blur); -webkit-backdrop-filter: var(--surf-blur);
+  border-radius: 12px 12px var(--radius) var(--radius);
+  border: 1px solid transparent;
+  transition: width var(--isl-dur) var(--isl-ease), height var(--isl-dur) var(--isl-ease), box-shadow var(--fade-dur) ease, border-color var(--fade-dur) ease;
+}
+.island.open .island-body { border-color: var(--surf-border); box-shadow: var(--surf-shadow); visibility: visible; }
+.island:not(.open) .island-body { visibility: hidden; transition: width var(--isl-dur) var(--isl-ease), height var(--isl-dur) var(--isl-ease), box-shadow var(--fade-dur) ease, border-color var(--fade-dur) ease, visibility 0s linear var(--isl-dur); }
+.island.unified .island-body { width: 100%; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: 0; border-radius: 0; box-shadow: none; }
+.view { width: var(--body-w); flex: none; animation: view-in var(--fade-dur) ease-out both; }
+@keyframes view-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.motion-elastic .view { animation-name: view-in-elastic; animation-timing-function: var(--isl-ease); animation-duration: calc(var(--fade-dur) * 1.6); }
+@keyframes view-in-elastic { from { opacity: 0; transform: translateY(-10px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* avatars */
+.av { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--c, #666); color: #fff; font-weight: 600; letter-spacing: -.02em; flex: none; width: 24px; height: 24px; font-size: 10px; }
+.av.s18 { width: 18px; height: 18px; font-size: 7.5px; }
+.av.s20 { width: 20px; height: 20px; font-size: 8px; }
+.av.s22 { width: 22px; height: 22px; font-size: 9px; }
+.av.s28 { width: 28px; height: 28px; font-size: 11px; }
+.av.s32 { width: 32px; height: 32px; font-size: 12px; }
+.av.s36 { width: 36px; height: 36px; font-size: 13.5px; }
+.av.bot { background: #4a4b55; color: #e6e6ea; }
+.av.bot .ico { width: 55%; height: 55%; }
+.app-fluid .av { background: linear-gradient(140deg, color-mix(in srgb, var(--c, #666) 80%, #fff 20%), color-mix(in srgb, var(--c, #666) 75%, #000 25%)); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .14), 0 2px 10px color-mix(in srgb, var(--c, #666) 50%, transparent); }
+.app-fluid .av.bot { background: linear-gradient(140deg, #5a5b66, #2d2e36); }
+.stack { display: flex; align-items: center; }
+.stack .av { margin-left: -7px; box-shadow: 0 0 0 2px var(--stack-ring, var(--surf-elev)); }
+.stack .av:first-child { margin-left: 0; }
+.app-fluid .stack .av { box-shadow: 0 0 0 2px var(--stack-ring, var(--surf)); }
+.island-top .stack { --stack-ring: var(--notch-color); }
+.notch-pill.app-calm .island-top .stack { --stack-ring: #f3f3f5; }
+.av.pop { animation: pop var(--fade-dur) var(--isl-ease) both; }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } }
+
+/* ---------- arrival card ---------- */
+.view-arrival { display: flex; align-items: center; gap: 11px; padding: 9px 14px 11px 12px; cursor: pointer; }
+.notch-pill .view-arrival { padding-top: 6px; }
+.arr-text { flex: 1; min-width: 0; }
+.arr-l1 { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.005em; }
+.arr-l1 b { font-weight: 650; }
+.arr-l2 { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.arr-l2 .mono { font-family: var(--mono); font-size: 10.5px; }
+.arr-count { font-size: 11px; font-weight: 650; background: var(--accent-soft); color: var(--accent); padding: 3px 8px; border-radius: 10px; white-space: nowrap; flex: none; display: none; }
+.arr-count.on { display: inline-block; }
+.arr-count.bump { animation: bump 360ms var(--isl-ease); }
+.arr-kind { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; color: #fff; }
+.arr-kind.fail { background: var(--danger); } .arr-kind.ok { background: var(--success); } .arr-kind.changes { background: var(--warn); } .arr-kind.info { background: var(--accent); } .arr-kind.zz { background: var(--purple); }
+.arr-avs { position: relative; flex: none; }
+.arr-avs .arr-kind { position: absolute; right: -5px; bottom: -4px; width: 16px; height: 16px; box-shadow: 0 0 0 2px var(--surf-elev); }
+.arr-avs .arr-kind .ico { width: 9px; height: 9px; stroke-width: 2.2; }
+.app-fluid .arr-avs .arr-kind { box-shadow: 0 0 0 2px var(--surf); }
+.app-fluid .view-arrival .av.s32 { width: 38px; height: 38px; font-size: 14px; }
+.app-fluid .view-arrival { padding: 10px 16px 13px 13px; }
+
+/* ---------- list ---------- */
+.view-list { max-height: var(--list-max, 540px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 6px; }
+.list-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 6px 16px; position: sticky; top: 0; z-index: 2; }
+.list-head h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -.01em; line-height: 1.2; }
+.sub { font-size: 11.5px; color: var(--text-2); margin-top: 2px; }
+.sub .new { color: var(--accent); font-weight: 600; }
+.head-actions { display: flex; gap: 2px; }
+.icon-btn { width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; text-decoration: none; flex: none; }
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+.icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.banner { margin: 4px 10px 6px; padding: 7px 10px; border-radius: 10px; background: var(--accent-soft); font-size: 11.5px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.banner .ico { color: var(--accent); }
+.banner .grow { flex: 1; min-width: 0; }
+.banner small { display: block; color: var(--text-2); font-size: 10.5px; }
+.banner .link-btn { padding: 2px 4px; }
+.snooze-all { margin: 4px 10px 6px; padding: 8px 10px; border-radius: 10px; background: var(--hover); font-size: 11.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rows { padding: 0 6px; }
+.row { display: flex; gap: 10px; padding: 8px 8px 8px 10px; border-radius: var(--row-radius); cursor: pointer; position: relative; align-items: flex-start; }
+.row:hover { background: var(--hover); }
+.row.unseen::before { content: ''; position: absolute; left: 3px; top: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); transform: translateY(-50%); }
+.row.flash { animation: rowflash 1100ms ease-out; }
+@keyframes rowflash { 0%, 30% { background: var(--accent-soft); } }
+.row-avs { padding-top: 3px; width: 34px; display: flex; justify-content: flex-start; flex: none; }
+.row-main { flex: 1; min-width: 0; }
+.row-top { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); line-height: 1.3; }
+.row-top .repo { font-weight: 500; white-space: nowrap; }
+.row-top .num { color: var(--text-3); }
+.row-top time { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row-title { font-size: 13px; color: var(--text); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.005em; }
+.row.unseen .row-title { font-weight: 600; }
+.row-prev { font-size: 11.5px; color: var(--text-2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-prev .who { color: var(--text); }
+.row.dim .row-title, .row.dim .row-prev { color: var(--text-2); }
+.row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 16px; min-width: 20px; }
+.badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.reason { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--hover); color: var(--text-2); white-space: nowrap; }
+.row-acts { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; background: var(--surf-elev); border: 1px solid var(--line); border-radius: 9px; padding: 2px; box-shadow: 0 4px 14px rgba(0, 0, 0, .14); }
+.row:hover .row-acts, .row:focus-within .row-acts { display: flex; }
+.row-acts .icon-btn { width: 26px; height: 26px; }
+.row-snooze { padding: 2px 8px 8px 54px; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); }
+.pr-ico { display: inline-flex; }
+.pr-ico.open { color: #1a7f37; } .app-fluid .pr-ico.open { color: #3fb950; }
+.pr-ico.merged { color: #8250df; } .app-fluid .pr-ico.merged { color: #a371f7; }
+.pr-ico.closed { color: #cf222e; } .app-fluid .pr-ico.closed { color: #f85149; }
+.section-toggle { width: calc(100% - 20px); margin: 4px 10px 0; display: flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--text-2); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; padding: 8px 6px 4px; cursor: pointer; border-radius: 6px; }
+.section-toggle:hover { color: var(--text); }
+.section-toggle .ico { transition: transform var(--fade-dur) ease; }
+.section-toggle[aria-expanded="true"] .ico { transform: rotate(90deg); }
+.empty { padding: 26px 16px 24px; text-align: center; color: var(--text-2); font-size: 12.5px; }
+.empty b { display: block; color: var(--text); font-size: 14px; margin-bottom: 3px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip-btn { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: var(--hover); border: 0; color: var(--text); cursor: pointer; font-weight: 500; white-space: nowrap; }
+.chip-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.chip-btn.ghost { background: transparent; color: var(--text-2); }
+
+/* ---------- conversation ---------- */
+.view-conv { display: flex; flex-direction: column; max-height: var(--conv-h, 560px); min-height: 360px; }
+.conv-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 6px; border-bottom: 1px solid var(--line); flex: none; }
+.conv-title { flex: 1; min-width: 0; padding: 0 4px; }
+.conv-repo { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.conv-repo .num { color: var(--text-3); }
+.conv-name { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; color: var(--text); margin-top: 1px; }
+.state { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: #fff; }
+.state.open { background: #1f883d; } .state.merged { background: #8250df; } .state.closed { background: #cf222e; }
+.timeline { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 12px 10px; overscroll-behavior: contain; scroll-behavior: smooth; }
+.motion-reduced .timeline { scroll-behavior: auto; }
+.earlier { width: 100%; border: 0; background: transparent; color: var(--text-2); font-size: 11px; font-weight: 500; padding: 6px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.earlier:hover { background: var(--hover); color: var(--text); }
+.ev { display: flex; gap: 9px; padding: 7px 0; }
+.ev-av { padding-top: 1px; flex: none; }
+.ev-main { flex: 1; min-width: 0; }
+.ev-head { font-size: 12px; color: var(--text-2); display: flex; gap: 5px; align-items: center; flex-wrap: wrap; line-height: 1.3; }
+.ev-head b { color: var(--text); font-weight: 600; }
+.ev-head time { margin-left: auto; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-head .mono { font-family: var(--mono); font-size: 11px; }
+.ev-body { font-size: 12.5px; line-height: 1.45; color: var(--text); margin-top: 3px; overflow-wrap: anywhere; }
+.ev-body code, .ev-head code { font-family: var(--mono); font-size: 11px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+.mention { color: var(--accent); font-weight: 500; }
+.ev.new .ev-body { }
+.rv { font-size: 10px; font-weight: 650; padding: 1px 6px; border-radius: 999px; }
+.rv.changes_requested { background: rgba(255, 159, 10, .18); color: #b25e00; } .app-fluid .rv.changes_requested { color: #ffb340; }
+.rv.approved { background: rgba(52, 199, 89, .18); color: #1b7a34; } .app-fluid .rv.approved { color: #4cd964; }
+.rv.commented { background: var(--hover); color: var(--text-2); }
+.ev-compact { align-items: center; padding: 5px 0; font-size: 12px; color: var(--text-2); gap: 9px; }
+.ev-compact .ev-ico { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; }
+.ev-compact .ev-ico.fail { color: var(--danger); background: rgba(255, 59, 48, .12); }
+.ev-compact .ev-ico.ok { color: var(--success); background: rgba(52, 199, 89, .14); }
+.ev-compact .ev-ico.run { color: var(--warn); background: rgba(255, 159, 10, .14); }
+.ev-compact .ev-ico.merged { color: var(--purple); background: rgba(175, 82, 222, .14); }
+.ev-compact .ev-ico.neutral { color: var(--text-2); background: var(--hover); }
+.ev-compact .ev-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-compact .ev-txt b { color: var(--text); font-weight: 600; }
+.ev-compact time { font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-detail { font-family: var(--mono); font-size: 10.5px; color: var(--danger); margin: 2px 0 2px 33px; opacity: .9; overflow-wrap: anywhere; }
+.ev-file { font-family: var(--mono); font-size: 10.5px; color: var(--text-2); margin-top: 7px; display: flex; align-items: center; gap: 5px; }
+.ev-file .ln-no { color: var(--text-3); }
+.code { font-family: var(--mono); font-size: 10.5px; line-height: 1.55; background: var(--code-bg); border-radius: 8px; padding: 5px 0; margin: 4px 0 0; overflow-x: auto; color: var(--text); }
+.code .ln { display: flex; padding: 0 8px; white-space: pre; }
+.code .ln .no { width: 24px; color: var(--text-3); text-align: right; margin-right: 8px; user-select: none; flex: none; font-size: 10px; }
+.code .ln .sg { width: 10px; color: var(--text-3); flex: none; }
+.code .ln.add { background: rgba(52, 199, 89, .13); } .code .ln.add .sg { color: var(--success); }
+.code .ln.del { background: rgba(255, 59, 48, .13); } .code .ln.del .sg { color: var(--danger); }
+.code .ln.hunk { color: var(--text-3); font-style: italic; }
+.code .ln.hl { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.code .ln.hl.add { background: color-mix(in srgb, var(--accent-soft) 60%, rgba(52, 199, 89, .14)); }
+.link-btn { font-size: 11px; color: var(--accent); background: none; border: 0; padding: 5px 0 0; cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 3px; }
+.link-btn:hover { text-decoration: underline; }
+.divider { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 4px; white-space: nowrap; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--accent-soft); }
+.divider.muted { color: var(--text-3); }
+.divider.muted::before, .divider.muted::after { background: var(--line); }
+.conv-foot { border-top: 1px solid var(--line); padding: 8px 10px 9px; flex: none; }
+.composer { display: flex; gap: 6px; align-items: flex-end; }
+.composer textarea { flex: 1; resize: none; border: 1px solid var(--line); background: var(--field); border-radius: 11px; padding: 7px 11px; font: 12.5px/1.4 var(--font); color: var(--text); height: 34px; max-height: 110px; outline: none; }
+.composer textarea:focus { border-color: var(--accent); }
+.composer textarea::placeholder { color: var(--text-3); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; border: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; margin-bottom: 2px; }
+.send:disabled { opacity: .35; cursor: default; }
+.send .ico { stroke-width: 2.2; }
+.conv-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.btn { font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.btn:hover { background: var(--hover); }
+.btn .ico { width: 13px; height: 13px; }
+.btn[aria-expanded="true"] { background: var(--hover); }
+.conv-actions .spacer { flex: 1; }
+.snooze-inline { width: 100%; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-2); padding-top: 2px; }
+
+/* ---------- settings ---------- */
+.view-settings { max-height: var(--list-max, 560px); overflow-y: auto; overscroll-behavior: contain; }
+.settings { padding: 4px 14px 12px; }
+.settings h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); margin: 12px 0 6px; font-weight: 650; }
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; min-height: 34px; }
+.srow label { font-size: 12.5px; color: var(--text); }
+.srow label small { display: block; font-size: 10.5px; color: var(--text-2); margin-top: 1px; }
+.srow.sub { padding-left: 14px; }
+.seg { display: inline-flex; background: var(--hover); border-radius: 8px; padding: 2px; flex: none; }
+.seg button { border: 0; background: transparent; font-size: 11.5px; font-weight: 500; padding: 4px 10px; border-radius: 6px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--surf-elev); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+.switch { width: 36px; height: 21px; border-radius: 11px; background: var(--text-3); position: relative; border: 0; cursor: pointer; transition: background var(--fade-dur) ease; flex: none; padding: 0; }
+.switch[aria-checked="true"] { background: var(--success); }
+.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform var(--fade-dur) ease; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
+.switch[aria-checked="true"]::after { transform: translateX(15px); }
+.switch:disabled { opacity: .45; cursor: default; }
+input[type="time"] { font: 12px var(--font); color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; color-scheme: light; }
+.app-fluid input[type="time"] { color-scheme: dark; }
+.presets { display: flex; gap: 8px; margin-top: 2px; }
+.preset { flex: 1; border: 1px solid var(--line); background: var(--field); border-radius: 12px; padding: 8px 10px; text-align: left; cursor: pointer; color: var(--text); display: flex; gap: 9px; align-items: center; }
+.preset:hover { background: var(--hover); }
+.preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.preset .sw { width: 30px; height: 30px; border-radius: 9px; flex: none; }
+.preset .sw.calm { background: linear-gradient(140deg, #fdfdfe, #dfe4ee); border: 1px solid rgba(0, 0, 0, .1); }
+.preset .sw.fluid { background: linear-gradient(140deg, #2b2b33, #09090c); border: 1px solid rgba(255, 255, 255, .15); }
+.preset b { display: block; font-size: 12.5px; font-weight: 600; }
+.preset small { font-size: 10.5px; color: var(--text-2); }
+.note { font-size: 10.5px; color: var(--text-2); padding: 0 0 6px; }
+.note .ico { width: 11px; height: 11px; display: inline-block; vertical-align: -1px; }
+
+/* ---------- demo toolbar / toast ---------- */
+.demo-bar {
+  position: fixed; bottom: 14px; right: 14px; z-index: 100; display: flex; align-items: center; gap: 3px;
+  background: rgba(22, 22, 26, .82); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: 12px; padding: 5px 6px; color: #d8d8de; font-size: 11px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+.demo-bar .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: #8a8a94; padding: 0 6px 0 4px; font-weight: 700; }
+.demo-bar button { font: 11px var(--font); font-weight: 500; color: #e6e6ec; background: rgba(255, 255, 255, .07); border: 0; border-radius: 7px; padding: 5px 8px; cursor: pointer; white-space: nowrap; }
+.demo-bar button:hover { background: rgba(255, 255, 255, .15); }
+.demo-bar button[aria-pressed="true"] { background: #fff; color: #111; }
+.demo-bar .sep { width: 1px; height: 18px; background: rgba(255, 255, 255, .12); margin: 0 4px; }
+.demo-bar .clock { font-variant-numeric: tabular-nums; color: #b9b9c2; padding: 0 6px 0 2px; }
+.demo-bar .grp { display: flex; gap: 1px; }
+.demo-bar .grp button { border-radius: 0; padding: 5px 7px; }
+.demo-bar .grp button:first-child { border-radius: 7px 0 0 7px; }
+.demo-bar .grp button:last-child { border-radius: 0 7px 7px 0; }
+.toast {
+  position: fixed; bottom: 58px; left: 50%; transform: translateX(-50%) translateY(6px); z-index: 90;
+  background: rgba(28, 28, 32, .92); color: #fff; padding: 7px 13px; border-radius: 10px; font-size: 12px;
+  opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .3); max-width: 80vw; overflow: hidden; text-overflow: ellipsis;
+}
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body class="app-calm motion-gentle notch-hardware">
+<div class="desktop" id="desktop">
+  <div class="wallpaper"></div>
+
+  <div class="menubar" aria-hidden="true">
+    <div class="left">
+      <span class="apple"><svg viewBox="0 0 24 24"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg></span>
+      <span class="app">Code</span><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Window</span><span>Help</span>
+    </div>
+    <div class="right">
+      <div class="tray">
+        <svg viewBox="0 0 24 24"><path d="M12 19.5a1.5 1.5 0 1 0 0 .01zM8.5 15.6a5 5 0 0 1 7 0l-1.4 1.4a3 3 0 0 0-4.2 0zM5.2 12.3a9.6 9.6 0 0 1 13.6 0l-1.4 1.4a7.6 7.6 0 0 0-10.8 0zM2 9a14 14 0 0 1 20 0l-1.4 1.4a12 12 0 0 0-17.2 0z"/></svg>
+        <svg viewBox="0 0 28 14"><rect x=".75" y=".75" width="23" height="12.5" rx="3.5" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.5"/><rect x="2.5" y="2.5" width="16" height="9" rx="2"/><path d="M25.5 4.5v5a2 2 0 0 0 1.5-2.5 2 2 0 0 0-1.5-2.5z" fill-opacity=".5"/></svg>
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="7" rx="3.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="5.5" cy="7.5" r="2.2"/><rect x="2" y="13" width="20" height="7" rx="3.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="18.5" cy="16.5" r="2.2"/></svg>
+      </div>
+      <span class="clock" id="menuClock">Thu Oct 2  2:32 PM</span>
+    </div>
+  </div>
+
+  <div class="editor" aria-hidden="true">
+    <div class="titlebar"><div class="tl"><i></i><i></i><i></i></div><div class="wtitle"><b>queue.ts</b> — platform-web</div></div>
+    <div class="main">
+      <aside class="tree">
+        <div class="hd">Explorer</div>
+        <div>▾ platform-web</div>
+        <div class="d1">▸ .github</div>
+        <div class="d1">▾ src</div>
+        <div class="d2">▸ components</div>
+        <div class="d2">▸ lib</div>
+        <div class="d2">▸ settings</div>
+        <div class="d2">▾ upload</div>
+        <div class="d3 act">queue.ts</div>
+        <div class="d3">queue.spec.ts</div>
+        <div class="d3">types.ts</div>
+        <div class="d2">app.tsx</div>
+        <div class="d1 dim">package.json</div>
+        <div class="d1 dim">tsconfig.json</div>
+      </aside>
+      <div class="codewrap">
+        <div class="tabs"><div class="tab act">queue.ts</div><div class="tab">queue.spec.ts</div><div class="tab">api.ts</div></div>
+        <pre id="editorCode"></pre>
+      </div>
+    </div>
+    <div class="status"><span>⎇ feat/upload-retry</span><span>✓ Prettier</span><div class="r"><span>Ln 48, Col 7</span><span>UTF-8</span><span>TypeScript</span></div></div>
+  </div>
+
+  <div class="island-wrap" id="islandWrap">
+    <i class="fillet fl"></i><i class="fillet fr"></i>
+    <div class="island unified" id="island">
+      <div class="island-top" id="islandTop" role="button" tabindex="0" aria-label="Gitoken inbox" data-act="toggle-list">
+        <div class="wing wing-l"><div class="wing-inner" id="wingL"></div></div>
+        <div class="notch-gap"></div>
+        <div class="wing wing-r"><div class="wing-inner" id="wingR"></div></div>
+      </div>
+      <div class="island-body" id="islandBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="demo-bar" id="demoBar" aria-label="Demo controls">
+  <span class="lbl">Demo</span>
+  <button data-demo="notify" title="Send a random notification">Send notification</button>
+  <button data-demo="burst" title="Send several events to the same PR">Burst to same PR</button>
+  <button data-demo="done-activity" title="New activity on a done group">Activity on done</button>
+  <span class="sep"></span>
+  <span class="clock" id="demoClock"></span>
+  <div class="grp" title="Advance simulated time">
+    <button data-demo="advance" data-ms="1800000">+30m</button>
+    <button data-demo="advance" data-ms="3600000">+1h</button>
+    <button data-demo="advance" data-ms="86400000">+1d</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp" title="Visual preset">
+    <button data-demo="preset" data-val="calm" id="presetCalm">Calm</button>
+    <button data-demo="preset" data-val="fluid" id="presetFluid">Fluid</button>
+  </div>
+  <button data-demo="reset" title="Clear saved state and reseed">Reset</button>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================================================
+   constants & helpers
+   ============================================================ */
+const LS_KEY = 'gitoken-fable51:state';
+const VERSION = 1;
+const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
+const NOTCH_W = 196, TOP_H = 36;
+const ARRIVAL_MS = 5200;
+const VIEW_W = { arrival: 364, list: 384, conv: 404, settings: 384 };
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const rand = a => a[Math.floor(Math.random() * a.length)];
+const basename = p => p.split('/').pop();
+
+const ICON = (() => {
+  const w = (body, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 16 16" aria-hidden="true">${body}</svg>`;
+  return {
+    glyph: w('<path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.4L2.9 10.8h10.2L11.8 8.4V6A3.8 3.8 0 0 0 8 2.2z"/><path d="M6.6 13a1.4 1.4 0 0 0 2.8 0"/>', 's16'),
+    pr: w('<circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="12.5" r="1.8"/><path d="M4 5.3v5.4M12 10.7V7a2 2 0 0 0-2-2H7.8"/><path d="M9.6 3.2 7.8 5l1.8 1.8"/>'),
+    merged: w('<circle cx="4" cy="3.5" r="1.8"/><circle cx="4" cy="12.5" r="1.8"/><circle cx="12" cy="8" r="1.8"/><path d="M4 5.3v5.4M4.3 6.2c.6 1.9 2.4 2.6 5.9 1.8"/>'),
+    issue: w('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.7" fill="currentColor" stroke="none"/>'),
+    issueClosed: w('<circle cx="8" cy="8" r="6"/><path d="M5.3 8.2l1.9 1.9 3.6-3.8"/>'),
+    check: w('<path d="M3 8.5l3.2 3.2L13 4.8"/>'),
+    x: w('<path d="M4 4l8 8M12 4l-8 8"/>'),
+    moon: w('<path d="M13.2 10.4A5.8 5.8 0 0 1 5.6 2.8 5.8 5.8 0 1 0 13.2 10.4z"/>'),
+    gear: w('<circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4"/>'),
+    back: w('<path d="M10 3L5 8l5 5"/>'),
+    chev: w('<path d="M6 3.5L10.5 8 6 12.5"/>', 's12'),
+    chevDown: w('<path d="M4 6l4 4 4-4"/>', 's12'),
+    pin: w('<path d="M6.2 2.5h3.6l-.4 3.6 2.4 2.1v1.2H4.2V8.2l2.4-2.1zM8 9.4V14"/>'),
+    ext: w('<path d="M7 3H3v10h10V9M9.5 2.5H13.5v4M13.5 2.5L7.5 8.5"/>'),
+    send: w('<path d="M8 13V3.5M4 7.5l4-4 4 4"/>'),
+    commit: w('<circle cx="8" cy="8" r="2.6"/><path d="M1.5 8h3.9M10.6 8h3.9"/>'),
+    comment: w('<path d="M2.5 3.5h11v7h-5l-3 2.6v-2.6h-3z"/>'),
+    eye: w('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
+    clock: w('<circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.5"/>'),
+    file: w('<path d="M4 1.5h5l3 3v10H4z M9 1.5v3h3"/>', 's12'),
+    bot: w('<rect x="2.5" y="4.5" width="11" height="8.5" rx="2"/><circle cx="6" cy="8.5" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8.5" r="1" fill="currentColor" stroke="none"/><path d="M8 4.5V2M6 11h4"/>'),
+    inbox: w('<path d="M2 9l1.6-5.5h8.8L14 9v4H2z M2 9h3.5l1 1.8h3L10.5 9H14"/>'),
+    spinner: w('<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5"/>'),
+  };
+})();
+
+/* ============================================================
+   demo content
+   ============================================================ */
+const ME = 'alexr';
+const USERS = {
+  alexr:   { name: 'Alex Rivera',     color: '#5b6cff' },
+  sarahc:  { name: 'Sarah Chen',      color: '#e25d7a' },
+  mlee:    { name: 'Marcus Lee',      color: '#2f8fe6' },
+  priyan:  { name: 'Priya Natarajan', color: '#8b5cf6' },
+  tomo:    { name: 'Tom Okafor',      color: '#13a37a' },
+  erossi:  { name: 'Elena Rossi',     color: '#f08c1e' },
+  jberg:   { name: 'Jonas Berg',      color: '#0ea5c6' },
+  atanaka: { name: 'Aiko Tanaka',     color: '#d9469e' },
+  ci:      { name: 'GitHub Actions',  color: '#4a4b55', bot: true },
+};
+const HUMANS = Object.keys(USERS).filter(k => k !== ME && !USERS[k].bot);
+const firstName = login => login === ME ? 'You' : USERS[login].name.split(' ')[0];
+const initials = name => name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+const SNIP_142_A = [
+  [' ', 46, '    try {'],
+  [' ', 47, '      return await api.upload(item.blob, { signal: item.signal });'],
+  [' ', 48, '    } catch (err) {'],
+  [' ', 49, '      if (attempt === MAX_ATTEMPTS - 1) throw err;'],
+  [' ', 50, '      await sleep(BACKOFF_MS * 2 ** attempt);'],
+];
+const SNIP_142_B = [
+  [' ', 48, '    } catch (err) {'],
+  [' ', 49, '      if (attempt === MAX_ATTEMPTS - 1) throw err;'],
+  [' ', 50, '      await sleep(BACKOFF_MS * 2 ** attempt);'],
+  [' ', 51, '    }'],
+  [' ', 52, '  }'],
+];
+const DIFF_142 = [
+  ['@', null, '@@ -36,7 +36,18 @@ import { sleep } from "../lib/time";'],
+  [' ', 38, 'const MAX_ATTEMPTS = 3;'],
+  ['-', null, 'const TIMEOUT_MS = 10_000;'],
+  ['+', 39, 'const BACKOFF_MS = 200;'],
+  [' ', 40, ''],
+  [' ', 41, 'export class UploadQueue {'],
+  [' ', 42, '  private items: QueueItem[] = [];'],
+  [' ', 43, ''],
+  [' ', 44, '  async flush(item: QueueItem) {'],
+  ['-', null, '    return api.upload(item.blob, { signal: item.signal });'],
+  ['+', 45, '    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {'],
+  ['+', 46, '      try {'],
+  ['+', 47, '        return await api.upload(item.blob, { signal: item.signal });'],
+  ['+', 48, '      } catch (err) {'],
+  ['+', 49, '        if (attempt === MAX_ATTEMPTS - 1) throw err;'],
+  ['+', 50, '        await sleep(BACKOFF_MS * 2 ** attempt);'],
+  ['+', 51, '      }'],
+  ['+', 52, '    }'],
+  [' ', 53, '  }'],
+  [' ', 54, '}'],
+];
+const SNIP_902 = [
+  [' ', 29, 'export function decodeCursor(cursor?: string): Cursor {'],
+  [' ', 30, '  if (!cursor) throw new BadRequest("cursor required");'],
+  [' ', 31, '  const [ts, id] = fromBase64url(cursor).split(":");'],
+  [' ', 32, '  return { ts: Number(ts), id };'],
+  [' ', 33, '}'],
+];
+const DIFF_902 = [
+  ['@', null, '@@ -24,9 +24,12 @@ import { BadRequest } from "../errors";'],
+  [' ', 26, 'type Cursor = { ts: number; id: string };'],
+  [' ', 27, ''],
+  ['-', null, 'export function decodeCursor(cursor: string): Cursor {'],
+  ['+', 29, 'export function decodeCursor(cursor?: string): Cursor {'],
+  ['+', 30, '  if (!cursor) throw new BadRequest("cursor required");'],
+  [' ', 31, '  const [ts, id] = fromBase64url(cursor).split(":");'],
+  [' ', 32, '  return { ts: Number(ts), id };'],
+  [' ', 33, '}'],
+  [' ', 34, ''],
+  ['+', 35, 'export function encodeCursor(c: Cursor): string {'],
+  ['+', 36, '  return toBase64url(`${c.ts}:${c.id}`);'],
+  ['+', 37, '}'],
+];
+const SNIP_138 = [
+  [' ', 12, 'export function SettingsPage() {'],
+  [' ', 13, '  const { data, isLoading } = useSettings();'],
+  [' ', 14, '  if (isLoading) return <Spinner />;'],
+  [' ', 15, '  return <Form initial={data} onSubmit={save} />;'],
+  [' ', 16, '}'],
+];
+const DIFF_138 = [
+  ['@', null, '@@ -1,6 +1,16 @@'],
+  ['-', null, 'angular.module("app").controller("SettingsCtrl", SettingsCtrl);'],
+  ['+', 1, 'import { useSettings } from "./useSettings";'],
+  ['+', 2, 'import { Form } from "../components/Form";'],
+  [' ', 3, ''],
+  ['+', 12, 'export function SettingsPage() {'],
+  ['+', 13, '  const { data, isLoading } = useSettings();'],
+  ['+', 14, '  if (isLoading) return <Spinner />;'],
+  ['+', 15, '  return <Form initial={data} onSubmit={save} />;'],
+  ['+', 16, '}'],
+];
+const REPO_SNIPPETS = {
+  'platform/web': { file: 'src/upload/queue.ts', line: 50, snippet: SNIP_142_B, diff: DIFF_142 },
+  'platform/api': { file: 'src/events/pagination.ts', line: 30, snippet: SNIP_902, diff: DIFF_902 },
+  'design/tokens': { file: 'src/settings/SettingsPage.tsx', line: 14, snippet: SNIP_138, diff: DIFF_138 },
+};
+
+function seedGroups(now) {
+  const m = n => now - n * MIN;
+  let id = 1;
+  const ev = (ts, actor, kind, extra = {}) => ({ id: id++, ts, actor, kind, ...extra });
+  const g = (o) => ({ done: false, doneAt: null, snoozeUntil: null, unseenCount: 0, lastVisit: null, state: 'open', ...o });
+  return [
+    g({ id: 'web-142', repo: 'platform/web', number: 142, type: 'pr', title: 'Add retry to upload queue', author: ME, reason: 'author', lastVisit: m(40),
+      events: [
+        ev(m(300), ME, 'comment', { body: 'Adds exponential backoff to `UploadQueue.flush` so transient failures don’t drop uploads. Capped at 3 attempts, tests included.' }),
+        ev(m(240), 'mlee', 'comment', { body: 'Do we want this behind a flag for the first release? Mostly thinking about the mobile web case where retries eat battery.' }),
+        ev(m(230), ME, 'reply', { body: 'Don’t think so — failures already surface in the activity panel, and three attempts with backoff is cheap.' }),
+        ev(m(180), ME, 'commit', { message: 'Cap retries at 3 and add tests', sha: '4f2e9c1' }),
+        ev(m(14), 'sarahc', 'review_comment', { file: 'src/upload/queue.ts', line: 48, body: 'This retries on every error, including 4xx. We should bail unless it’s a network error or a 5xx.', snippet: SNIP_142_A, diff: DIFF_142 }),
+        ev(m(12), 'sarahc', 'review_comment', { file: 'src/upload/queue.ts', line: 50, body: 'No jitter here — if the API blips, every client retries in lockstep.', snippet: SNIP_142_B, diff: DIFF_142 }),
+        ev(m(11), 'sarahc', 'review', { state: 'changes_requested', body: 'Great direction. Two things inline before this goes in.' }),
+        ev(m(6), 'ci', 'ci', { status: 'failed', check: 'ci / unit', duration: '2m 14s', detail: 'UploadQueue › retries on 503 — expected 3 calls, received 4' }),
+      ] }),
+    g({ id: 'web-138', repo: 'platform/web', number: 138, type: 'pr', title: 'Migrate settings page to React', author: 'mlee', reason: 'review_requested', lastVisit: null,
+      events: [
+        ev(m(125), 'mlee', 'comment', { body: 'Port of the AngularJS settings page. Behavior should be 1:1; the retry toggle now writes through `useSettings`.' }),
+        ev(m(120), 'mlee', 'review_request'),
+        ev(m(50), 'mlee', 'comment', { mention: true, body: '@alexr this moves the upload settings into `SettingsPage` — can you double-check the retry toggle still saves on blur?' }),
+        ev(m(45), 'ci', 'ci', { status: 'passed', check: 'ci / e2e', duration: '6m 41s' }),
+      ] }),
+    g({ id: 'api-891', repo: 'platform/api', number: 891, type: 'issue', title: 'Rate limiter returns 500 on burst traffic', author: 'priyan', reason: 'participant', lastVisit: m(23 * 60),
+      events: [
+        ev(m(26 * 60), 'priyan', 'comment', { body: 'Sending ~50 requests within 100ms to `/v1/events` returns a 500 instead of 429. Logs show `TokenBucket.take` going negative.' }),
+        ev(m(24 * 60), ME, 'reply', { body: 'Reproduced locally. Looks like the refill math, I’ll dig in tomorrow.' }),
+        ev(m(25), 'priyan', 'comment', { mention: true, body: 'Confirmed — refill uses seconds but the burst window is in ms. @alexr the fix is probably one line in `refill()`; repro script attached to the issue.' }),
+      ] }),
+    g({ id: 'tok-57', repo: 'design/tokens', number: 57, type: 'pr', title: 'Add dark mode semantic colors', author: 'erossi', reason: 'review_requested', lastVisit: m(90),
+      events: [
+        ev(m(180), 'erossi', 'review_request'),
+        ev(m(178), 'erossi', 'comment', { body: 'Adds `color.surface.*` and `color.text.*` semantic tokens for dark mode. Literal palettes are untouched.' }),
+        ev(m(120), 'tomo', 'review', { state: 'approved', body: 'Semantic names match the Figma library now. Ship it.' }),
+        ev(m(115), 'ci', 'ci', { status: 'passed', check: 'tokens / build', duration: '48s' }),
+      ] }),
+    g({ id: 'api-902', repo: 'platform/api', number: 902, type: 'pr', title: 'Support cursor pagination in /events', author: ME, reason: 'author', lastVisit: m(120),
+      events: [
+        ev(m(6 * 60), ME, 'comment', { body: 'Replaces offset pagination on `/v1/events` with opaque cursors. Old `?page=` keeps working for one release.' }),
+        ev(m(180), 'jberg', 'review_comment', { file: 'src/events/pagination.ts', line: 30, body: 'If `cursor` is undefined we should start from the newest event rather than throw — that’s what the mobile client sends on first load.', snippet: SNIP_902, diff: DIFF_902 }),
+        ev(m(170), 'jberg', 'review', { state: 'approved', body: 'LGTM once the cursor fallback is in.' }),
+        ev(m(160), 'ci', 'ci', { status: 'passed', check: 'ci / unit', duration: '1m 52s' }),
+      ] }),
+    g({ id: 'web-129', repo: 'platform/web', number: 129, type: 'issue', title: 'Flaky test: UploadQueue retries on 503', author: ME, reason: 'author', lastVisit: m(4 * 60),
+      events: [
+        ev(m(2 * DAY / MIN), ME, 'comment', { body: 'Fails roughly 1 in 20 runs on CI, never locally. Suspect fake timers.' }),
+        ev(m(5 * 60), 'atanaka', 'comment', { mention: true, body: '@alexr bisected this to the backoff change — the fake timers aren’t advanced past the second retry, so the assertion races the real clock.' }),
+      ] }),
+    g({ id: 'tok-61', repo: 'design/tokens', number: 61, type: 'issue', title: 'Token naming RFC: semantic vs. literal', author: 'erossi', reason: 'mention', lastVisit: m(20 * 60), snoozeUntil: now + 45 * MIN,
+      events: [
+        ev(m(27 * 60), 'erossi', 'comment', { body: 'Proposal: keep literal palettes (`blue.500`) but only expose semantic tokens (`color.action.primary`) to product code.' }),
+        ev(m(23 * 60), ME, 'reply', { body: 'Strong +1. The web app only consumes semantic tokens today anyway.' }),
+        ev(m(30), 'erossi', 'comment', { mention: true, body: '@alexr can you list which literal tokens platform/web still imports? Want to put a deprecation date on them.' }),
+      ] }),
+    g({ id: 'api-877', repo: 'platform/api', number: 877, type: 'pr', title: 'Fix timezone drift in scheduler', author: ME, reason: 'author', state: 'merged', done: true, doneAt: m(2 * DAY / MIN), lastVisit: m(2 * DAY / MIN),
+      events: [
+        ev(m(3 * DAY / MIN), ME, 'comment', { body: 'Scheduler compared wall-clock hours across DST boundaries. Now everything is UTC until render time.' }),
+        ev(m(2 * DAY / MIN + 40), 'jberg', 'review', { state: 'approved', body: '' }),
+        ev(m(2 * DAY / MIN + 30), 'ci', 'ci', { status: 'passed', check: 'ci / unit', duration: '2m 03s' }),
+        ev(m(2 * DAY / MIN + 5), 'jberg', 'merged'),
+      ] }),
+  ];
+}
+
+const TEMPLATES = [
+  { kind: 'comment', body: 'Pulled this locally — works, but the first backoff feels aggressive at 200ms. Could we start at 500ms?' },
+  { kind: 'comment', mention: true, body: '@alexr can you take a look at the failing snapshot? I think it is just the timestamp formatting.' },
+  { kind: 'comment', body: 'Related: we hit the same thing in the mobile client last quarter. Linking the postmortem.' },
+  { kind: 'comment', mention: true, body: 'Heads up @alexr — this conflicts with the branch I’m about to merge. Happy to rebase mine instead.' },
+  { kind: 'review', state: 'approved', body: 'LGTM. One nit inline but not blocking.', pr: true },
+  { kind: 'review', state: 'changes_requested', body: 'We should not retry on 4xx responses — only 5xx and network errors.', pr: true },
+  { kind: 'review_comment', body: 'Jitter here would avoid a thundering herd when the API comes back.', pr: true },
+  { kind: 'review_comment', body: 'Can this be a `const`? It never reassigns.', pr: true },
+  { kind: 'ci', status: 'failed', check: 'ci / unit', duration: '3m 02s', detail: 'UploadQueue › adds jitter — Expected 3 calls, received 4', pr: true },
+  { kind: 'ci', status: 'passed', check: 'ci / e2e', duration: '6m 41s', pr: true },
+  { kind: 'commit', message: 'Address review: skip retry on 4xx', sha: 'a1b2c3d', pr: true },
+];
+
+const EDITOR_SRC = `import { api } from "../lib/api";
+import { sleep } from "../lib/time";
+import type { QueueItem } from "./types";
+
+const MAX_ATTEMPTS = 3;
+const BACKOFF_MS = 200;
+
+export class UploadQueue {
+  private items: QueueItem[] = [];
+
+  enqueue(item: QueueItem) {
+    this.items.push(item);
+    void this.flush(item);
+  }
+
+  async flush(item: QueueItem) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        return await api.upload(item.blob, { signal: item.signal });
+      } catch (err) {
+        // TODO(sarah): don't retry 4xx
+        if (attempt === MAX_ATTEMPTS - 1) throw err;
+        await sleep(BACKOFF_MS * 2 ** attempt);
+      }
+    }
+  }
+
+  size() {
+    return this.items.length;
+  }
+}`;
+
+/* ============================================================
+   state
+   ============================================================ */
+const DEFAULT_SETTINGS = {
+  appearance: 'calm', motion: 'gentle', notchMode: 'hardware',
+  quietMode: false, quietHours: { enabled: false, start: '22:00', end: '08:00' }, snoozeUntil: null,
+};
+let S;                     // persisted state
+const UI = {               // ephemeral
+  view: 'collapsed', groupId: null, anchor: null, pinned: false, hoverTop: false,
+  arrival: null, arrTimer: null, queue: [], showSnoozed: false, showDone: false, showEarlier: false,
+  diffs: new Set(), snoozeMenu: null, snoozeAllMenu: false, flashId: null, lastQuiet: null, prevUnseen: 0,
+};
+const sysReduced = matchMedia('(prefers-reduced-motion: reduce)');
+
+const simNow = () => Date.now() + S.offset;
+function fresh() {
+  const now = Date.now();
+  const groups = seedGroups(now);
+  groups.forEach(normalizeUnseen);
+  return { v: VERSION, offset: 38 * MIN, settings: structuredClone(DEFAULT_SETTINGS), groups };
+}
+function normalizeUnseen(g) {
+  const anchor = g.lastVisit ?? -Infinity;
+  g.unseenCount = g.done ? 0 : g.events.filter(e => e.ts > anchor && e.actor !== ME).length;
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) { const s = JSON.parse(raw); if (s && s.v === VERSION && Array.isArray(s.groups)) return s; }
+  } catch (e) { /* ignore */ }
+  return fresh();
+}
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { /* ignore */ } }
+const byId = id => S.groups.find(g => g.id === id);
+const isSnoozed = g => !!g.snoozeUntil && g.snoozeUntil > simNow();
+const lastEv = g => g.events[g.events.length - 1];
+const inboxGroups = () => S.groups.filter(g => !g.done && !isSnoozed(g)).sort((a, b) => lastEv(b).ts - lastEv(a).ts);
+const unseenGroups = () => inboxGroups().filter(g => g.unseenCount > 0);
+const pendingGroups = () => inboxGroups().filter(g => g.unseenCount === 0);
+const snoozedGroups = () => S.groups.filter(g => !g.done && isSnoozed(g)).sort((a, b) => a.snoozeUntil - b.snoozeUntil);
+const doneGroups = () => S.groups.filter(g => g.done).sort((a, b) => b.doneAt - a.doneAt);
+const isOpen = () => UI.view === 'list' || UI.view === 'conv' || UI.view === 'settings';
+const viewingGroup = id => UI.view === 'conv' && UI.groupId === id;
+
+function inQuietHours(now) {
+  const q = S.settings.quietHours; if (!q.enabled) return false;
+  const d = new Date(now); const cur = d.getHours() * 60 + d.getMinutes();
+  const [sh, sm] = q.start.split(':').map(Number), [eh, em] = q.end.split(':').map(Number);
+  const s = sh * 60 + sm, e = eh * 60 + em;
+  if (s === e) return false;
+  return s < e ? (cur >= s && cur < e) : (cur >= s || cur < e);
+}
+function quietHoursEnd(now) {
+  const [eh, em] = S.settings.quietHours.end.split(':').map(Number);
+  const d = new Date(now); d.setHours(eh, em, 0, 0);
+  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+function quietReason(now = simNow()) {
+  if (S.settings.quietMode) return { kind: 'manual', label: 'Quiet mode is on', sub: 'Activity is collected without animations' };
+  if (S.settings.snoozeUntil && now < S.settings.snoozeUntil) return { kind: 'snooze', until: S.settings.snoozeUntil, label: `Everything snoozed ${fmtUntil(S.settings.snoozeUntil, now)}`, sub: 'New activity is collected quietly' };
+  if (inQuietHours(now)) return { kind: 'hours', until: quietHoursEnd(now), label: `Quiet hours ${fmtUntil(quietHoursEnd(now), now)}`, sub: `${fmtHM(S.settings.quietHours.start)} – ${fmtHM(S.settings.quietHours.end)} · collecting quietly` };
+  return null;
+}
+const isQuiet = () => !!quietReason();
+function tomorrowAt9(now) { const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); }
+function snoozeTarget(opt, now = simNow()) { return opt === '30m' ? now + 30 * MIN : opt === '1h' ? now + HOUR : tomorrowAt9(now); }
+
+/* ---------- time formatting ---------- */
+const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const fmtHM = hm => { const [h, m] = hm.split(':').map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return fmtTime(d.getTime()); };
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+function fmtRel(ts, now) { const d = now - ts; if (d < MIN) return 'now'; if (d < HOUR) return Math.floor(d / MIN) + 'm'; if (d < DAY) return Math.floor(d / HOUR) + 'h'; return Math.floor(d / DAY) + 'd'; }
+function fmtStamp(ts, now) {
+  if (sameDay(ts, now)) return fmtTime(ts);
+  if (sameDay(ts, now - DAY)) return 'Yesterday ' + fmtTime(ts);
+  return new Date(ts).toLocaleDateString([], { weekday: 'short' }) + ' ' + fmtTime(ts);
+}
+function fmtUntil(ts, now) {
+  if (sameDay(ts, now)) return 'until ' + fmtTime(ts);
+  if (sameDay(ts, now + DAY)) return 'until tomorrow ' + fmtTime(ts);
+  return 'until ' + new Date(ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + fmtTime(ts);
+}
+const fmtClock = ts => new Date(ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + '  ' + fmtTime(ts);
+
+/* ============================================================
+   event semantics
+   ============================================================ */
+const REVIEW_LABEL = { changes_requested: 'requested changes', approved: 'approved', commented: 'reviewed' };
+function describe(ev) {
+  switch (ev.kind) {
+    case 'comment': return ev.mention ? 'mentioned you' : 'commented';
+    case 'reply': return 'replied';
+    case 'review': return REVIEW_LABEL[ev.state];
+    case 'review_comment': return 'commented on ' + basename(ev.file);
+    case 'ci': return (ev.status === 'failed' ? 'failed' : ev.status === 'passed' ? 'passed' : 'running') + ' · ' + ev.check;
+    case 'commit': return 'pushed a commit';
+    case 'review_request': return 'requested your review';
+    case 'merged': return 'merged this';
+    case 'closed': return 'closed this';
+    case 'reopened': return 'reopened this';
+    default: return 'updated';
+  }
+}
+const actorLabel = ev => ev.actor === 'ci' ? 'Checks' : USERS[ev.actor].name;
+function evKindClass(ev) {
+  if (ev.kind === 'ci') return ev.status === 'failed' ? 'fail' : 'ok';
+  if (ev.kind === 'review') return ev.state === 'approved' ? 'ok' : ev.state === 'changes_requested' ? 'changes' : 'info';
+  if (ev.kind === 'merged') return 'zz';
+  return 'info';
+}
+function evKindIcon(ev) {
+  if (ev.kind === 'ci') return ev.status === 'failed' ? ICON.x : ICON.check;
+  if (ev.kind === 'review') return ev.state === 'approved' ? ICON.check : ev.state === 'changes_requested' ? ICON.x : ICON.eye;
+  if (ev.kind === 'review_request') return ICON.eye;
+  if (ev.kind === 'commit') return ICON.commit;
+  if (ev.kind === 'merged') return ICON.merged;
+  return ICON.comment;
+}
+function evBodyText(ev) { return ev.body || ev.message || ev.detail || ''; }
+function previewLine(g) {
+  const ev = lastEv(g); const who = ev.actor === 'ci' ? 'Checks' : firstName(ev.actor);
+  const body = evBodyText(ev).replace(/`/g, '');
+  return `<span class="who">${esc(who)}</span> ${esc(describe(ev))}${body ? ' · ' + esc(body) : ''}`;
+}
+function typeIcon(g) {
+  if (g.type === 'pr') return `<span class="pr-ico ${g.state}" title="Pull request · ${g.state}">${g.state === 'merged' ? ICON.merged : ICON.pr}</span>`;
+  return `<span class="pr-ico ${g.state === 'open' ? 'open' : 'merged'}" title="Issue · ${g.state}">${g.state === 'open' ? ICON.issue : ICON.issueClosed}</span>`;
+}
+const REASON = { review_requested: 'Review requested', mention: 'Mentioned', author: g => g.type === 'pr' ? 'Your PR' : 'Your issue', participant: 'Participating' };
+const reasonLabel = g => typeof REASON[g.reason] === 'function' ? REASON[g.reason](g) : REASON[g.reason];
+const ghUrl = g => `https://github.com/${g.repo}/${g.type === 'pr' ? 'pull' : 'issues'}/${g.number}`;
+function md(s) {
+  return esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/(^|[\s(])@([a-z0-9_-]+)/gi, '$1<span class="mention">@$2</span>').replace(/\n/g, '<br>');
+}
+function recentActors(g, n = 3) {
+  const out = [];
+  for (let i = g.events.length - 1; i >= 0 && out.length < n; i--) { const a = g.events[i].actor; if (a !== ME && !out.includes(a)) out.push(a); }
+  if (!out.length) out.push(g.author);
+  return out;
+}
+function avatar(login, size = 24, extra = '') {
+  const u = USERS[login];
+  if (u.bot) return `<span class="av bot s${size} ${extra}" title="${esc(u.name)}">${ICON.bot}</span>`;
+  return `<span class="av s${size} ${extra}" style="--c:${u.color}" title="${esc(u.name)}">${initials(u.name)}</span>`;
+}
+const stack = (logins, size, extra = '') => `<span class="stack">${logins.map(l => avatar(l, size, extra)).join('')}</span>`;
+
+/* ============================================================
+   DOM refs
+   ============================================================ */
+const wrap = $('#islandWrap'), island = $('#island'), islandTop = $('#islandTop'), body = $('#islandBody');
+const wingL = $('#wingL'), wingR = $('#wingR');
+const toastEl = $('#toast');
+let toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('on'), 2600);
+}
+
+/* ============================================================
+   settings application
+   ============================================================ */
+function effectiveMotion() { return sysReduced.matches ? 'reduced' : S.settings.motion; }
+function applySettings() {
+  const s = S.settings; const b = document.body;
+  b.classList.remove('app-calm', 'app-fluid', 'motion-gentle', 'motion-elastic', 'motion-reduced', 'notch-hardware', 'notch-pill');
+  b.classList.add('app-' + s.appearance, 'motion-' + effectiveMotion(), 'notch-' + s.notchMode);
+  island.classList.toggle('unified', s.appearance === 'fluid' || s.notchMode === 'pill');
+  $('#presetCalm').setAttribute('aria-pressed', s.appearance === 'calm' && s.motion === 'gentle');
+  $('#presetFluid').setAttribute('aria-pressed', s.appearance === 'fluid' && s.motion === 'elastic');
+}
+
+/* ============================================================
+   rendering: top wings
+   ============================================================ */
+function renderTop() {
+  const now = simNow();
+  const unseen = unseenGroups().length;
+  const quiet = quietReason(now);
+  const pill = S.settings.notchMode === 'pill';
+  const collapsed = UI.view === 'collapsed';
+  let left = '', right = '';
+  if (UI.view === 'arrival' && UI.arrival && !pill) {
+    const shown = arrivalActors(UI.arrival).slice(-3);
+    // mark freshly added avatars so only they animate
+    const prev = UI.arrival.shownActors || new Set();
+    left = `<span class="stack">${shown.map(a => avatar(a, 22, prev.has(a) ? '' : 'pop')).join('')}</span>`;
+    UI.arrival.shownActors = new Set(shown);
+  } else if (pill || !collapsed || unseen > 0 || UI.hoverTop || quiet) {
+    left = `<span class="glyph" aria-hidden="true">${ICON.glyph}</span>`;
+  }
+  if (unseen > 0) right += `<span class="count" id="topCount">${unseen}</span>`;
+  else if (collapsed && UI.hoverTop) right += `<span class="hint">Inbox</span>`;
+  if (quiet) right += `<span class="quiet" title="${esc(quiet.label)}">${ICON.moon}</span>`;
+  if (!unseen && !quiet && pill && !UI.hoverTop && collapsed) right = '';
+  wingL.innerHTML = left; wingR.innerHTML = right;
+  if (unseen !== UI.prevUnseen) { const c = $('#topCount'); if (c && unseen > UI.prevUnseen) c.classList.add('bump'); UI.prevUnseen = unseen; }
+  islandTop.setAttribute('aria-label', `Gitoken — ${unseen} unseen, ${pendingGroups().length} pending`);
+}
+
+/* ============================================================
+   rendering: body views
+   ============================================================ */
+let ro = null;
+function renderBody() {
+  let html = '';
+  if (UI.view === 'arrival') html = renderArrival();
+  else if (UI.view === 'list') html = renderList();
+  else if (UI.view === 'conv') html = renderConv(byId(UI.groupId));
+  else if (UI.view === 'settings') html = renderSettings();
+  body.innerHTML = html;
+  const view = body.firstElementChild;
+  if (ro) ro.disconnect();
+  if (view) { ro = new ResizeObserver(() => layout()); ro.observe(view); }
+}
+
+function arrivalActors(arr) {
+  if (arr.kind !== 'event') return arr.actors;
+  const actors = [];
+  for (const ev of arr.events) if (!actors.includes(ev.actor)) actors.push(ev.actor);
+  return actors;
+}
+function arrivalLines(arr) {
+  const evs = arr.events; const last = evs[evs.length - 1];
+  if (arr.kind === 'summary') {
+    const n = unseenGroups().length, u = unseenGroups().reduce((a, g) => a + g.unseenCount, 0);
+    return { l1: `<b>Snooze ended</b> · ${u} update${u === 1 ? '' : 's'} in ${n} thread${n === 1 ? '' : 's'}`, l2: 'Click to open your inbox', count: '' };
+  }
+  const g = byId(arr.groupId);
+  if (arr.kind === 'snooze_end') return { l1: `<b>Back from snooze</b> · ${g.unseenCount} new update${g.unseenCount === 1 ? '' : 's'}`, l2: `${esc(g.repo)} <span class="mono">#${g.number}</span> · ${esc(g.title)}`, count: '' };
+  const l1 = `<b>${esc(actorLabel(last))}</b> ${esc(describe(last))}`;
+  const l2 = `${esc(g.repo)} <span class="mono">#${g.number}</span> · ${esc(g.title)}`;
+  const count = evs.length > 1 ? `${evs.length} updates` : '';
+  return { l1, l2, count };
+}
+function renderArrival() {
+  const arr = UI.arrival; const { l1, l2, count } = arrivalLines(arr);
+  const last = arr.events[arr.events.length - 1];
+  const synthetic = arr.kind !== 'event';
+  const who = synthetic ? arr.actors[0] : last.actor;
+  const kind = synthetic ? 'zz' : evKindClass(last);
+  const ico = synthetic ? ICON.moon : evKindIcon(last);
+  return `<div class="view view-arrival" data-act="arrival-open" role="button" tabindex="0">
+    <span class="arr-avs">${avatar(who, 32)}<span class="arr-kind ${kind}" id="arrKind">${ico}</span></span>
+    <span class="arr-text"><div class="arr-l1" id="arrL1">${l1}</div><div class="arr-l2" id="arrL2">${l2}</div></span>
+    <span class="arr-count ${count ? 'on' : ''}" id="arrCount">${count}</span>
+  </div>`;
+}
+function updateArrivalCard() {
+  const arr = UI.arrival; const { l1, l2, count } = arrivalLines(arr);
+  const last = arr.events[arr.events.length - 1];
+  const l1El = $('#arrL1'), l2El = $('#arrL2'), cEl = $('#arrCount'), kEl = $('#arrKind'), avEl = $('.view-arrival .arr-avs .av');
+  if (!l1El) return;
+  l1El.innerHTML = l1; l2El.innerHTML = l2;
+  cEl.textContent = count; cEl.classList.toggle('on', !!count);
+  cEl.classList.remove('bump'); void cEl.offsetWidth; cEl.classList.add('bump');
+  kEl.className = 'arr-kind ' + evKindClass(last); kEl.innerHTML = evKindIcon(last);
+  if (avEl) avEl.outerHTML = avatar(last.actor, 32);
+  renderTop();
+}
+
+function renderRow(g, opts = {}) {
+  const now = simNow(); const ev = lastEv(g);
+  const cls = ['row', g.unseenCount > 0 ? 'unseen' : '', opts.dim ? 'dim' : '', UI.flashId === g.id ? 'flash' : ''].join(' ');
+  const acts = opts.done
+    ? `<button class="icon-btn" data-act="undone" data-id="${g.id}" title="Move back to inbox">${ICON.inbox}</button>`
+    : opts.snoozed
+      ? `<button class="icon-btn" data-act="unsnooze" data-id="${g.id}" title="Unsnooze">${ICON.clock}</button><button class="icon-btn" data-act="done" data-id="${g.id}" title="Mark done">${ICON.check}</button>`
+      : `<button class="icon-btn" data-act="snooze-menu" data-id="${g.id}" title="Snooze">${ICON.moon}</button><button class="icon-btn" data-act="done" data-id="${g.id}" title="Mark done">${ICON.check}</button>`;
+  const side = g.unseenCount > 0 ? `<span class="badge" title="${g.unseenCount} unseen">${g.unseenCount}</span>` : `<span class="reason">${esc(reasonLabel(g))}</span>`;
+  const snoozeRow = UI.snoozeMenu === g.id ? `<div class="row-snooze">Snooze ${snoozeChips(g.id)}</div>` : '';
+  return `<div class="${cls}" data-act="open-group" data-id="${g.id}" role="button" tabindex="0" aria-label="${esc(g.repo)} #${g.number} ${esc(g.title)}">
+      <div class="row-avs">${stack(recentActors(g, 2), 22)}</div>
+      <div class="row-main">
+        <div class="row-top">${typeIcon(g)}<span class="repo">${esc(g.repo)}</span><span class="num">#${g.number}</span>${opts.snoozed ? `<span class="reason">${ICON.moon} ${esc(fmtUntil(g.snoozeUntil, now))}</span>` : ''}<time>${fmtRel(ev.ts, now)}</time></div>
+        <div class="row-title">${esc(g.title)}</div>
+        <div class="row-prev">${previewLine(g)}</div>
+      </div>
+      <div class="row-side">${side}</div>
+      <div class="row-acts" data-stop>${acts}</div>
+    </div>${snoozeRow}`;
+}
+function snoozeChips(id, act = 'snooze') {
+  const now = simNow();
+  return `<span class="chips" data-stop>
+    <button class="chip-btn" data-act="${act}" data-id="${id}" data-opt="30m">30 min</button>
+    <button class="chip-btn" data-act="${act}" data-id="${id}" data-opt="1h">1 hour</button>
+    <button class="chip-btn" data-act="${act}" data-id="${id}" data-opt="tomorrow" title="${fmtTime(tomorrowAt9(now))} tomorrow">Until tomorrow</button>
+  </span>`;
+}
+function renderList() {
+  const now = simNow();
+  const inbox = inboxGroups(), unseen = unseenGroups().length, pending = pendingGroups().length;
+  const snoozed = snoozedGroups(), done = doneGroups();
+  const q = quietReason(now);
+  const sub = inbox.length ? `${unseen ? `<span class="new">${unseen} new</span>` : 'Nothing new'} · ${pending} pending` : 'All clear';
+  let banner = '';
+  if (q) banner = `<div class="banner">${ICON.moon}<span class="grow">${esc(q.label)}<small>${esc(q.sub)}</small></span>
+      <button class="link-btn" data-act="${q.kind === 'manual' ? 'toggle-quiet' : q.kind === 'snooze' ? 'cancel-snooze-all' : 'settings'}">${q.kind === 'hours' ? 'Settings' : 'End'}</button></div>`;
+  if (UI.snoozeAllMenu && !(q && q.kind === 'snooze')) banner += `<div class="snooze-all">${ICON.moon} Snooze everything ${snoozeChips('all', 'snooze-all')}</div>`;
+  const rows = inbox.length ? inbox.map(g => renderRow(g)).join('') : `<div class="empty"><b>Inbox zero</b>Nothing needs you right now.</div>`;
+  const snoozedSec = snoozed.length ? `<button class="section-toggle" data-act="toggle-snoozed" aria-expanded="${UI.showSnoozed}">${ICON.chev} Snoozed · ${snoozed.length}</button>${UI.showSnoozed ? `<div class="rows">${snoozed.map(g => renderRow(g, { snoozed: true, dim: true })).join('')}</div>` : ''}` : '';
+  const doneSec = done.length ? `<button class="section-toggle" data-act="toggle-done" aria-expanded="${UI.showDone}">${ICON.chev} Done · ${done.length}</button>${UI.showDone ? `<div class="rows">${done.map(g => renderRow(g, { done: true, dim: true })).join('')}</div>` : ''}` : '';
+  return `<div class="view view-list" role="dialog" aria-label="Inbox">
+    <header class="list-head"><div><h1>Inbox</h1><div class="sub">${sub}</div></div>
+      <div class="head-actions">
+        <button class="icon-btn" data-act="snooze-all-menu" title="Snooze everything" aria-pressed="${UI.snoozeAllMenu || (q && q.kind === 'snooze') ? 'true' : 'false'}">${ICON.moon}</button>
+        <button class="icon-btn" data-act="settings" title="Settings">${ICON.gear}</button>
+      </div></header>
+    ${banner}
+    <div class="rows">${rows}</div>
+    ${snoozedSec}${doneSec}
+  </div>`;
+}
+
+function renderEvent(ev, isNew = false) {
+  const now = simNow(); const u = USERS[ev.actor];
+  const t = `<time title="${esc(new Date(ev.ts).toLocaleString())}">${fmtStamp(ev.ts, now)}</time>`;
+  const name = ev.actor === ME ? 'You' : esc(u.name);
+  const cls = `ev ${isNew ? 'new' : ''}`;
+  switch (ev.kind) {
+    case 'comment':
+    case 'reply':
+      return `<article class="${cls}" data-ev="${ev.id}"><div class="ev-av">${avatar(ev.actor, 24)}</div><div class="ev-main">
+        <div class="ev-head"><b>${name}</b> ${ev.kind === 'reply' ? 'replied' : ev.mention ? 'mentioned you' : 'commented'} ${t}</div>
+        <div class="ev-body">${md(ev.body)}</div></div></article>`;
+    case 'review':
+      if (!ev.body) return compactEvent(ev, ev.state === 'approved' ? 'ok' : 'neutral', `<b>${name}</b> ${REVIEW_LABEL[ev.state]}${ev.state === 'approved' ? ' these changes' : ''}`, isNew);
+      return `<article class="${cls}" data-ev="${ev.id}"><div class="ev-av">${avatar(ev.actor, 24)}</div><div class="ev-main">
+        <div class="ev-head"><b>${name}</b> <span class="rv ${ev.state}">${REVIEW_LABEL[ev.state]}</span> ${t}</div>
+        <div class="ev-body">${md(ev.body)}</div></div></article>`;
+    case 'review_comment':
+      return `<article class="${cls}" data-ev="${ev.id}"><div class="ev-av">${avatar(ev.actor, 24)}</div><div class="ev-main">
+        <div class="ev-head"><b>${name}</b> commented on <span class="mono">${esc(basename(ev.file))}</span> ${t}</div>
+        <div class="ev-body">${md(ev.body)}</div>
+        <div class="ev-file">${ICON.file}${esc(ev.file)}<span class="ln-no">:${ev.line}</span></div>
+        <div class="code-wrap" data-code="${ev.id}">${renderCode(ev)}</div></div></article>`;
+    case 'ci': {
+      const st = ev.status === 'failed' ? 'fail' : ev.status === 'passed' ? 'ok' : 'run';
+      const txt = `<b>${esc(ev.check)}</b> ${ev.status}${ev.duration ? ' · ' + esc(ev.duration) : ''}`;
+      return compactEvent(ev, st, txt, isNew) + (ev.detail ? `<div class="ev-detail">${esc(ev.detail)}</div>` : '');
+    }
+    case 'commit': return compactEvent(ev, 'neutral', `<b>${name}</b> pushed <code>${esc(ev.sha)}</code> ${esc(ev.message)}`, isNew);
+    case 'review_request': return compactEvent(ev, 'neutral', `<b>${name}</b> requested your review`, isNew);
+    case 'merged': return compactEvent(ev, 'merged', `<b>${name}</b> merged this pull request`, isNew);
+    case 'closed': return compactEvent(ev, 'neutral', `<b>${name}</b> closed this`, isNew);
+    case 'reopened': return compactEvent(ev, 'neutral', `<b>${name}</b> reopened this`, isNew);
+  }
+  return '';
+}
+function compactEvent(ev, st, txt, isNew) {
+  const now = simNow();
+  const ico = st === 'fail' ? ICON.x : st === 'ok' ? ICON.check : st === 'merged' ? ICON.merged : st === 'run' ? ICON.spinner : evKindIcon(ev);
+  return `<div class="ev ev-compact ${isNew ? 'new' : ''}" data-ev="${ev.id}"><span class="ev-ico ${st}">${ico}</span><span class="ev-txt">${txt}</span><time>${fmtStamp(ev.ts, now)}</time></div>`;
+}
+function renderCode(ev) {
+  const expanded = UI.diffs.has(ev.id);
+  const raw = expanded ? ev.diff : ev.snippet;
+  const indent = Math.min(...raw.filter(([s, , t]) => s !== '@' && t.trim()).map(([, , t]) => t.match(/^ */)[0].length));
+  const lines = raw.map(([s, n, t]) => [s, n, s === '@' ? t : t.slice(indent)]);
+  const rows = lines.map(([s, n, t]) => {
+    const cls = s === '+' ? 'add' : s === '-' ? 'del' : s === '@' ? 'hunk' : '';
+    const hl = n === ev.line ? ' hl' : '';
+    return `<div class="ln ${cls}${hl}"><span class="no">${n ?? ''}</span><span class="sg">${s === '@' ? '' : s}</span><span class="tx">${esc(t)}</span></div>`;
+  }).join('');
+  return `<pre class="code">${rows}</pre><button class="link-btn" data-act="toggle-diff" data-ev="${ev.id}">${expanded ? 'Collapse diff' : 'Expand diff'} ${expanded ? ICON.chevDown : ICON.chev}</button>`;
+}
+function renderConv(g) {
+  const now = simNow();
+  const anchor = UI.anchor;
+  const older = anchor == null ? [] : g.events.filter(e => e.ts <= anchor);
+  const newer = anchor == null ? g.events.slice() : g.events.filter(e => e.ts > anchor);
+  let hidden, shown;
+  if (newer.length) { hidden = older; shown = []; } else { shown = older.slice(-3); hidden = older.slice(0, -3); }
+  const earlierBtn = hidden.length ? `<button class="earlier" data-act="toggle-earlier" aria-expanded="${UI.showEarlier}">${UI.showEarlier ? ICON.chevDown : ICON.chev} ${UI.showEarlier ? 'Hide' : 'Show'} ${hidden.length} earlier update${hidden.length === 1 ? '' : 's'}</button>` : '';
+  const divider = newer.length
+    ? `<div class="divider" id="divider"><span>${anchor == null ? 'New for you' : 'New since your last visit · ' + fmtStamp(anchor, now)}</span></div>`
+    : `<div class="divider muted" id="divider"><span>You’re all caught up${anchor ? ' · last visit ' + fmtStamp(anchor, now) : ''}</span></div>`;
+  const snoozeRow = UI.snoozeMenu === g.id ? `<div class="snooze-inline">Snooze ${snoozeChips(g.id)}</div>` : '';
+  return `<div class="view view-conv" role="dialog" aria-label="${esc(g.repo)} #${g.number}">
+    <header class="conv-head">
+      <button class="icon-btn" data-act="back" title="Back to inbox">${ICON.back}</button>
+      <div class="conv-title">
+        <div class="conv-repo">${typeIcon(g)}<span>${esc(g.repo)}</span><span class="num">#${g.number}</span><span class="state ${g.state}">${g.state[0].toUpperCase() + g.state.slice(1)}</span></div>
+        <div class="conv-name" title="${esc(g.title)}">${esc(g.title)}</div>
+      </div>
+      <button class="icon-btn" data-act="pin" title="${UI.pinned ? 'Unpin (closes when clicking outside)' : 'Pin (stays open)'}" aria-pressed="${UI.pinned}">${ICON.pin}</button>
+      <a class="icon-btn" href="${ghUrl(g)}" target="_blank" rel="noopener" title="Open on GitHub">${ICON.ext}</a>
+    </header>
+    <div class="timeline" id="timeline">
+      ${earlierBtn}
+      <div class="earlier-wrap" id="earlierWrap" ${UI.showEarlier ? '' : 'hidden'}>${hidden.map(e => renderEvent(e)).join('')}</div>
+      ${shown.map(e => renderEvent(e)).join('')}
+      ${divider}
+      <div class="new-wrap" id="newWrap">${newer.map(e => renderEvent(e, true)).join('')}</div>
+    </div>
+    <footer class="conv-foot">
+      <div class="composer"><textarea id="composer" rows="1" placeholder="Reply…" aria-label="Reply"></textarea><button class="send" data-act="send-reply" title="Send (Enter)" disabled>${ICON.send}</button></div>
+      <div class="conv-actions">
+        <button class="btn" data-act="done" data-id="${g.id}">${ICON.check} Done</button>
+        <button class="btn" data-act="snooze-menu" data-id="${g.id}" aria-expanded="${UI.snoozeMenu === g.id}">${ICON.moon} Snooze ${ICON.chevDown}</button>
+        <span class="spacer"></span>
+        <a class="btn" href="${ghUrl(g)}" target="_blank" rel="noopener">Open on GitHub ${ICON.ext}</a>
+        ${snoozeRow}
+      </div>
+    </footer>
+  </div>`;
+}
+function renderSettings() {
+  const s = S.settings, now = simNow(); const q = quietReason(now);
+  const seg = (key, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-act="set" data-key="${key}" data-val="${v}" aria-pressed="${s[key] === v}">${l}</button>`).join('')}</div>`;
+  const snoozeAll = s.snoozeUntil && s.snoozeUntil > now
+    ? `<div class="snooze-all">${ICON.moon}<span class="grow">Snoozed ${esc(fmtUntil(s.snoozeUntil, now))}</span><button class="chip-btn" data-act="cancel-snooze-all">Cancel</button></div>`
+    : `<div class="snooze-all">${ICON.moon} Snooze everything ${snoozeChips('all', 'snooze-all')}</div>`;
+  return `<div class="view view-settings" role="dialog" aria-label="Settings">
+    <header class="conv-head"><button class="icon-btn" data-act="back-list" title="Back to inbox">${ICON.back}</button><div class="conv-title"><div class="conv-name">Settings</div></div></header>
+    <div class="settings">
+      <h3>Preset</h3>
+      <div class="presets">
+        <button class="preset" data-act="preset" data-val="calm" aria-pressed="${s.appearance === 'calm' && s.motion === 'gentle'}"><span class="sw calm"></span><span><b>Calm</b><small>Native glass, gentle motion</small></span></button>
+        <button class="preset" data-act="preset" data-val="fluid" aria-pressed="${s.appearance === 'fluid' && s.motion === 'elastic'}"><span class="sw fluid"></span><span><b>Fluid</b><small>Dark surfaces, elastic motion</small></span></button>
+      </div>
+      <div class="srow"><label>Appearance</label>${seg('appearance', [['calm', 'Calm'], ['fluid', 'Fluid']])}</div>
+      <div class="srow"><label>Motion</label>${seg('motion', [['gentle', 'Gentle'], ['elastic', 'Elastic'], ['reduced', 'Reduced']])}</div>
+      ${sysReduced.matches ? `<div class="note">${ICON.eye} Your system prefers reduced motion — animations are minimized regardless of this setting.</div>` : ''}
+      <div class="srow"><label>Display<small>Preview a display without a notch</small></label>${seg('notchMode', [['hardware', 'Hardware notch'], ['pill', 'Floating pill']])}</div>
+      <h3>Quiet</h3>
+      <div class="srow"><label>Quiet mode<small>Collect activity without arrival animations</small></label><button class="switch" role="switch" aria-checked="${s.quietMode}" data-act="toggle-quiet" aria-label="Quiet mode"></button></div>
+      <div class="srow"><label>Quiet hours${s.quietHours.enabled && q && q.kind === 'hours' ? '<small>Active now</small>' : ''}</label><button class="switch" role="switch" aria-checked="${s.quietHours.enabled}" data-act="toggle-quiet-hours" aria-label="Quiet hours"></button></div>
+      <div class="srow sub"><label>From</label><input type="time" data-qh="start" value="${s.quietHours.start}" ${s.quietHours.enabled ? '' : 'disabled'}><label>to</label><input type="time" data-qh="end" value="${s.quietHours.end}" ${s.quietHours.enabled ? '' : 'disabled'}></div>
+      <h3>Snooze</h3>
+      ${snoozeAll}
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   layout
+   ============================================================ */
+function layout() {
+  const hw = S.settings.notchMode === 'hardware';
+  const lw = wingL.offsetWidth, rw = wingR.offsetWidth;
+  const topW = hw ? NOTCH_W + 2 * Math.max(lw, rw) : Math.max(lw + rw, 44);
+  const open = UI.view !== 'collapsed';
+  const view = body.firstElementChild;
+  let bodyW = 0, bodyH = 0;
+  const islandTopPx = hw ? 0 : 40;
+  const maxH = Math.max(240, window.innerHeight - islandTopPx - TOP_H - 90);
+  wrap.style.setProperty('--conv-h', Math.min(600, maxH) + 'px');
+  wrap.style.setProperty('--list-max', Math.min(560, maxH) + 'px');
+  if (open && view) {
+    bodyW = VIEW_W[UI.view];
+    wrap.style.setProperty('--body-w', bodyW + 'px');
+    bodyH = view.offsetHeight;
+  }
+  const islW = Math.max(topW, bodyW);
+  wrap.style.setProperty('--top-w', (island.classList.contains('unified') ? islW : topW) + 'px');
+  wrap.style.setProperty('--isl-w', islW + 'px');
+  wrap.style.setProperty('--body-h', bodyH + 'px');
+  wrap.style.setProperty('--isl-h', (TOP_H + bodyH) + 'px');
+  island.classList.toggle('open', open);
+}
+function render() { renderTop(); renderBody(); layout(); }
+
+/* ============================================================
+   arrivals
+   ============================================================ */
+function startArrivalTimer() { clearTimeout(UI.arrTimer); UI.arrTimer = setTimeout(dismissArrival, ARRIVAL_MS); }
+function showArrival(arr) {
+  UI.arrival = arr; UI.view = 'arrival';
+  render();
+  startArrivalTimer();
+}
+function notifyArrival(g, ev, kind = 'event') {
+  if (isOpen()) return;                     // panel is open: the list/timeline updates live instead
+  if (UI.arrival && kind === 'event' && UI.arrival.kind === 'event' && UI.arrival.groupId === g.id) {
+    UI.arrival.events.push(ev); updateArrivalCard(); layout(); startArrivalTimer(); return;
+  }
+  let actors = [];
+  if (kind === 'snooze_end') actors = recentActors(g, 3);
+  else if (kind === 'summary') { for (const ug of unseenGroups()) for (const a of recentActors(ug, 2)) if (!actors.includes(a) && actors.length < 3) actors.push(a); if (!actors.length) actors.push(ME); actors.sort((a, b) => (USERS[a].bot ? 1 : 0) - (USERS[b].bot ? 1 : 0)); }
+  const arr = { kind, groupId: g ? g.id : null, events: kind === 'event' ? [ev] : [], actors };
+  if (UI.arrival) { const q = UI.queue.find(a => a.kind === 'event' && kind === 'event' && a.groupId === g.id); if (q) q.events.push(ev); else UI.queue.push(arr); return; }
+  showArrival(arr);
+}
+function dismissArrival() {
+  clearTimeout(UI.arrTimer); UI.arrTimer = null;
+  if (UI.view !== 'arrival') { UI.arrival = null; return; }
+  UI.arrival = null; UI.view = 'collapsed';
+  render();
+  if (UI.queue.length) setTimeout(() => { if (UI.view === 'collapsed' && UI.queue.length) showArrival(UI.queue.shift()); }, 420);
+}
+function clearArrival() { clearTimeout(UI.arrTimer); UI.arrTimer = null; UI.arrival = null; UI.queue.length = 0; }
+
+/* ============================================================
+   actions
+   ============================================================ */
+let nextId = 1000;
+function addEvent(g, data) {
+  const ev = { id: nextId++, ts: simNow(), ...data };
+  g.events.push(ev);
+  let reopened = false;
+  if (g.done) { g.done = false; g.doneAt = null; reopened = true; }
+  if (ev.kind === 'merged') g.state = 'merged';
+  if (ev.kind === 'closed') g.state = 'closed';
+  if (ev.kind === 'reopened') g.state = 'open';
+  const viewing = viewingGroup(g.id);
+  if (!viewing && ev.actor !== ME) g.unseenCount++;
+  save();
+  const suppressed = isSnoozed(g) || isQuiet();
+  if (viewing) appendToTimeline(ev);
+  else if (UI.view === 'list') { UI.flashId = g.id; renderBody(); setTimeout(() => { UI.flashId = null; }, 1200); }
+  if (!suppressed && !viewing) notifyArrival(g, ev);
+  renderTop(); layout();
+  return { ev, reopened, suppressed };
+}
+function appendToTimeline(ev) {
+  const tl = $('#timeline'), nw = $('#newWrap'); if (!tl || !nw) return;
+  const nearBottom = tl.scrollHeight - tl.scrollTop - tl.clientHeight < 80;
+  nw.insertAdjacentHTML('beforeend', renderEvent(ev, true));
+  const div = $('#divider'); if (div && div.classList.contains('muted')) { div.classList.remove('muted'); div.firstElementChild.textContent = 'New while you’re here'; }
+  if (nearBottom) tl.scrollTop = tl.scrollHeight;
+}
+function openList() {
+  clearArrival(); UI.view = 'list'; UI.snoozeMenu = null; UI.snoozeAllMenu = false;
+  render();
+}
+function openGroup(id) {
+  const g = byId(id); if (!g) return;
+  const now = simNow();
+  clearArrival();
+  UI.anchor = g.lastVisit;
+  g.lastVisit = now; g.unseenCount = 0;
+  UI.view = 'conv'; UI.groupId = id; UI.showEarlier = false; UI.diffs = new Set(); UI.snoozeMenu = null;
+  save(); render();
+  const tl = $('#timeline'); if (tl) tl.scrollTop = 0;
+}
+function leaveGroup() {
+  const g = byId(UI.groupId);
+  if (g) { g.lastVisit = simNow(); g.unseenCount = 0; save(); }
+  UI.groupId = null;
+}
+function closeIsland() {
+  if (UI.view === 'conv') leaveGroup();
+  UI.view = 'collapsed'; UI.pinned = false; UI.snoozeMenu = null; UI.snoozeAllMenu = false;
+  render();
+}
+function markDone(id) {
+  const g = byId(id); if (!g) return;
+  g.done = true; g.doneAt = simNow(); g.snoozeUntil = null; g.unseenCount = 0;
+  if (viewingGroup(id)) { UI.groupId = null; UI.view = 'list'; }
+  save(); render(); toast(`Done · ${g.repo} #${g.number}`);
+}
+function unDone(id) { const g = byId(id); if (!g) return; g.done = false; g.doneAt = null; g.lastVisit = simNow(); save(); render(); }
+function snoozeGroup(id, opt) {
+  const g = byId(id); if (!g) return;
+  const now = simNow(); g.snoozeUntil = snoozeTarget(opt, now); UI.snoozeMenu = null;
+  if (viewingGroup(id)) { leaveGroup(); UI.view = 'list'; }
+  save(); render(); toast(`Snoozed ${fmtUntil(g.snoozeUntil, now)} · ${g.repo} #${g.number}`);
+}
+function unsnoozeGroup(id) { const g = byId(id); if (!g) return; g.snoozeUntil = null; save(); render(); }
+function snoozeAll(opt) {
+  const now = simNow(); S.settings.snoozeUntil = snoozeTarget(opt, now); UI.snoozeAllMenu = false;
+  save(); render(); toast(`Everything snoozed ${fmtUntil(S.settings.snoozeUntil, now)}`);
+}
+function cancelSnoozeAll() { S.settings.snoozeUntil = null; save(); render(); }
+function sendReply() {
+  const ta = $('#composer'); if (!ta) return;
+  const text = ta.value.trim(); if (!text) return;
+  const g = byId(UI.groupId); if (!g) return;
+  const ev = { id: nextId++, ts: simNow(), actor: ME, kind: 'reply', body: text };
+  g.events.push(ev); save();
+  appendToTimeline(ev);
+  ta.value = ''; ta.style.height = ''; $('.send').disabled = true;
+  const tl = $('#timeline'); if (tl) tl.scrollTop = tl.scrollHeight;
+}
+function setSetting(key, val) {
+  S.settings[key] = val; save(); applySettings(); render();
+}
+function applyPreset(val) {
+  S.settings.appearance = val; S.settings.motion = val === 'calm' ? 'gentle' : 'elastic'; save(); applySettings(); render();
+}
+function advanceTime(ms) {
+  S.offset += ms; save(); tick(true);
+  toast(`Clock → ${fmtClock(simNow())}`);
+}
+function resetDemo() {
+  try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
+  clearArrival();
+  S = fresh(); save();
+  Object.assign(UI, { view: 'collapsed', groupId: null, anchor: null, pinned: false, showSnoozed: false, showDone: false, showEarlier: false, snoozeMenu: null, snoozeAllMenu: false, prevUnseen: 0 });
+  UI.diffs = new Set();
+  applySettings(); render(); updateClocks();
+  toast('Demo reset');
+}
+
+/* ============================================================
+   demo generators
+   ============================================================ */
+function demoNotify() {
+  const candidates = S.groups.filter(g => !g.done);
+  const open = candidates.filter(g => !isSnoozed(g));
+  const g = Math.random() < .85 && open.length ? rand(open) : rand(candidates);
+  const pool = TEMPLATES.filter(t => !t.pr || g.type === 'pr');
+  const t = structuredClone(rand(pool));
+  const actor = t.kind === 'ci' ? 'ci' : t.kind === 'commit' ? (g.author === ME ? rand(HUMANS) : g.author) : rand(HUMANS.filter(h => h !== g.author || g.type === 'issue'));
+  if (t.kind === 'review_comment') Object.assign(t, REPO_SNIPPETS[g.repo] || REPO_SNIPPETS['platform/web']);
+  const { ev, suppressed } = addEvent(g, { actor, ...t });
+  toast(`${actorLabel(ev)} ${describe(ev)} · ${g.repo} #${g.number}${suppressed ? (isSnoozed(g) ? ' (group snoozed — collected quietly)' : ' (quiet — collected quietly)') : ''}`);
+}
+function demoBurst() {
+  const g = S.groups.find(x => x.id === 'web-142' && !x.done) || S.groups.find(x => x.type === 'pr' && !x.done) || S.groups[0];
+  const seq = [
+    { actor: 'sarahc', kind: 'review_comment', file: 'src/upload/queue.ts', line: 49, body: 'One more: `MAX_ATTEMPTS` should probably come from config so mobile can set it lower.', snippet: SNIP_142_A, diff: DIFF_142 },
+    { actor: 'sarahc', kind: 'review_comment', file: 'src/upload/queue.ts', line: 50, body: 'Let’s log the attempt number so we can see the retries in Datadog.', snippet: SNIP_142_B, diff: DIFF_142 },
+    { actor: 'sarahc', kind: 'review', state: 'changes_requested', body: 'Second pass — almost there.' },
+    { actor: 'ci', kind: 'ci', status: 'failed', check: 'ci / lint', duration: '41s', detail: 'src/upload/queue.ts:50 — no-console' },
+  ];
+  seq.forEach((e, i) => setTimeout(() => { const { suppressed } = addEvent(g, e); if (i === seq.length - 1) toast(`4 events sent to ${g.repo} #${g.number}${suppressed ? ' (collected quietly)' : ''}`); }, i * 750));
+}
+function demoDoneActivity() {
+  const done = doneGroups();
+  if (!done.length) { toast('No done groups — mark one done first (✓ in the inbox).'); return; }
+  const g = done[0];
+  const actor = rand(HUMANS.filter(h => h !== g.author));
+  const { suppressed } = addEvent(g, { actor, kind: 'comment', mention: true, body: `@alexr this seems to have regressed in 2.14.1 — the scheduler fired an hour early for Europe/London last night. Can we reopen?` });
+  toast(`${USERS[actor].name} mentioned you on done group ${g.repo} #${g.number} → back in inbox${suppressed ? ' (collected quietly)' : ''}`);
+}
+
+/* ============================================================
+   clock / tick
+   ============================================================ */
+function updateClocks() {
+  const now = simNow(); const txt = fmtClock(now);
+  $('#menuClock').textContent = txt; $('#demoClock').textContent = fmtTime(now);
+}
+function tick(force) {
+  const now = simNow(); updateClocks();
+  let changed = false, summary = false;
+  const expiredGroups = S.groups.filter(g => g.snoozeUntil && g.snoozeUntil <= now);
+  for (const g of expiredGroups) { g.snoozeUntil = null; changed = true; }
+  if (S.settings.snoozeUntil && S.settings.snoozeUntil <= now) {
+    S.settings.snoozeUntil = null; changed = true;
+    if (unseenGroups().length && !isQuiet()) { notifyArrival(null, null, 'summary'); summary = true; }
+  }
+  if (!summary && !isQuiet()) for (const g of expiredGroups) if (g.unseenCount > 0) notifyArrival(g, null, 'snooze_end');
+  const q = quietReason(now); const qk = q ? q.kind : null;
+  if (qk !== UI.lastQuiet) { UI.lastQuiet = qk; changed = true; }
+  if (changed) { save(); if (UI.view !== 'arrival') render(); else { renderTop(); layout(); } }
+  else if (force) render();
+}
+
+/* ============================================================
+   events
+   ============================================================ */
+wrap.addEventListener('click', e => {
+  const stop = e.target.closest('[data-stop]');
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (stop && !el.closest('[data-stop]')) return;
+  switch (act) {
+    case 'toggle-list': isOpen() ? closeIsland() : openList(); break;
+    case 'arrival-open': {
+      const arr = UI.arrival; if (!arr) break;
+      if (arr.groupId) openGroup(arr.groupId); else openList();
+      break;
+    }
+    case 'open-group': if (e.target.closest('.row-acts')) break; openGroup(id); break;
+    case 'back': leaveGroup(); UI.view = 'list'; UI.snoozeMenu = null; render(); break;
+    case 'back-list': UI.view = 'list'; render(); break;
+    case 'pin': UI.pinned = !UI.pinned; el.setAttribute('aria-pressed', UI.pinned); el.title = UI.pinned ? 'Unpin (closes when clicking outside)' : 'Pin (stays open)'; toast(UI.pinned ? 'Pinned — stays open until you close it' : 'Unpinned'); break;
+    case 'done': markDone(id); break;
+    case 'undone': unDone(id); break;
+    case 'snooze-menu': UI.snoozeMenu = UI.snoozeMenu === id ? null : id; renderBody(); layout(); break;
+    case 'snooze': snoozeGroup(id, el.dataset.opt); break;
+    case 'unsnooze': unsnoozeGroup(id); break;
+    case 'snooze-all-menu': UI.snoozeAllMenu = !UI.snoozeAllMenu; renderBody(); layout(); break;
+    case 'snooze-all': snoozeAll(el.dataset.opt); break;
+    case 'cancel-snooze-all': cancelSnoozeAll(); break;
+    case 'settings': UI.view = 'settings'; UI.snoozeAllMenu = false; render(); break;
+    case 'set': setSetting(el.dataset.key, el.dataset.val); break;
+    case 'preset': applyPreset(el.dataset.val); break;
+    case 'toggle-quiet': S.settings.quietMode = !S.settings.quietMode; save(); render(); break;
+    case 'toggle-quiet-hours': S.settings.quietHours.enabled = !S.settings.quietHours.enabled; save(); render(); break;
+    case 'toggle-snoozed': UI.showSnoozed = !UI.showSnoozed; renderBody(); layout(); break;
+    case 'toggle-done': UI.showDone = !UI.showDone; renderBody(); layout(); break;
+    case 'toggle-earlier': {
+      const tl = $('#timeline'), w = $('#earlierWrap'); const before = tl.scrollHeight;
+      UI.showEarlier = !UI.showEarlier; w.hidden = !UI.showEarlier;
+      el.setAttribute('aria-expanded', UI.showEarlier);
+      el.innerHTML = `${UI.showEarlier ? ICON.chevDown : ICON.chev} ${UI.showEarlier ? 'Hide' : 'Show'} ${w.children.length} earlier update${w.children.length === 1 ? '' : 's'}`;
+      if (UI.showEarlier) { tl.style.scrollBehavior = 'auto'; tl.scrollTop += tl.scrollHeight - before; tl.style.scrollBehavior = ''; }
+      break;
+    }
+    case 'toggle-diff': {
+      const evId = Number(el.dataset.ev); const g = byId(UI.groupId); const ev = g.events.find(x => x.id === evId);
+      if (UI.diffs.has(evId)) UI.diffs.delete(evId); else UI.diffs.add(evId);
+      const wrapEl = wrap.querySelector(`[data-code="${evId}"]`); if (wrapEl) wrapEl.innerHTML = renderCode(ev);
+      break;
+    }
+    case 'send-reply': sendReply(); break;
+  }
+});
+wrap.addEventListener('change', e => {
+  const inp = e.target.closest('input[data-qh]'); if (!inp) return;
+  S.settings.quietHours[inp.dataset.qh] = inp.value || S.settings.quietHours[inp.dataset.qh]; save(); render();
+});
+wrap.addEventListener('input', e => {
+  if (e.target.id !== 'composer') return;
+  const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(110, ta.scrollHeight) + 'px';
+  const send = $('.send'); if (send) send.disabled = !ta.value.trim();
+});
+wrap.addEventListener('keydown', e => {
+  if (e.target.id === 'composer' && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
+});
+islandTop.addEventListener('mouseenter', () => { UI.hoverTop = true; if (UI.view === 'collapsed') { renderTop(); layout(); } });
+islandTop.addEventListener('mouseleave', () => { UI.hoverTop = false; if (UI.view === 'collapsed') { renderTop(); layout(); } });
+body.addEventListener('mouseenter', () => { if (UI.view === 'arrival') clearTimeout(UI.arrTimer); });
+body.addEventListener('mouseleave', () => { if (UI.view === 'arrival') startArrivalTimer(); });
+
+document.addEventListener('pointerdown', e => {
+  if (!isOpen() || UI.pinned) return;
+  if (wrap.contains(e.target) || e.target.closest('.demo-bar')) return;
+  closeIsland();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (isOpen()) { closeIsland(); e.preventDefault(); }
+    else if (UI.view === 'arrival') { UI.queue.length = 0; dismissArrival(); }
+  }
+});
+$('#demoBar').addEventListener('click', e => {
+  const b = e.target.closest('button[data-demo]'); if (!b) return;
+  switch (b.dataset.demo) {
+    case 'notify': demoNotify(); break;
+    case 'burst': demoBurst(); break;
+    case 'done-activity': demoDoneActivity(); break;
+    case 'advance': advanceTime(Number(b.dataset.ms)); break;
+    case 'preset': applyPreset(b.dataset.val); break;
+    case 'reset': resetDemo(); break;
+  }
+});
+window.addEventListener('resize', layout);
+sysReduced.addEventListener('change', () => { applySettings(); render(); });
+
+/* ============================================================
+   editor window content
+   ============================================================ */
+function hl(src) {
+  const re = /(\/\/.*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|\b(import|from|export|const|let|class|private|async|await|return|for|try|catch|throw|if|new|interface|void|function|of|type)\b|\b(\d[\d_]*)\b|\b([A-Za-z_]\w*)(?=\()/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(src))) {
+    out += esc(src.slice(last, m.index));
+    const cls = m[1] ? 'c' : m[2] ? 's' : m[3] ? 'k' : m[4] ? 'n2' : 'f';
+    out += `<i class="${cls}">${esc(m[0])}</i>`;
+    last = re.lastIndex;
+  }
+  return out + esc(src.slice(last));
+}
+$('#editorCode').innerHTML = EDITOR_SRC.split('\n').map((l, i) => `<div class="l ${i === 20 ? 'cur' : ''}"><span class="n">${i + 1}</span><span>${hl(l) || ' '}</span></div>`).join('');
+
+/* ============================================================
+   boot
+   ============================================================ */
+S = load();
+S.groups.forEach(g => { for (const e of g.events) if (e.id >= nextId) nextId = e.id + 1; });
+UI.prevUnseen = unseenGroups().length;
+UI.lastQuiet = (quietReason() || {}).kind || null;
+applySettings();
+render();
+updateClocks();
+setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>

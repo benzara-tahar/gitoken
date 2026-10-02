@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gitoken prototypes</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 64px 24px;
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    color: #e8e8ed;
+    background: radial-gradient(1200px 600px at 20% -10%, #3a2d6b 0%, transparent 60%),
+                radial-gradient(900px 500px at 110% 10%, #1d4a6b 0%, transparent 55%), #0e0f14;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .lede { color: #a1a1aa; margin: 0 0 36px; }
+  .grid { display: grid; gap: 14px; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    padding: 20px 22px; border-radius: 16px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    transition: background .2s, border-color .2s, transform .2s;
+  }
+  a.card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); transform: translateY(-1px); }
+  .head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .head strong { font-size: 17px; }
+  .model { font: 12px ui-monospace, "SF Mono", Menlo, monospace; color: #8b8b95; }
+  .tag { margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+         padding: 3px 8px; border-radius: 999px; background: rgba(10,132,255,.18); color: #6cb6ff; }
+  .card p { margin: 0; color: #c7c7cf; }
+  h2 { font-size: 15px; margin: 40px 0 10px; color: #a1a1aa; font-weight: 600; letter-spacing: .02em; }
+  ul { margin: 0; padding-left: 18px; color: #c7c7cf; }
+  li { margin: 4px 0; }
+  @media (prefers-reduced-motion: reduce) { a.card { transition: none; } a.card:hover { transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gitoken prototypes</h1>
+  <p class="lede">Three independent builds of the same brief, each a single self-contained <code>index.html</code>. Open any card; use the demo toolbar at the bottom of each scene.</p>
+
+  <div class="grid">
+    <a class="card" href="opus-5.5/index.html">
+      <div class="head"><strong>Opus 5.5</strong><span class="model">claude-opus-5-5 · xhigh</span><span class="tag">Chosen basis</span></div>
+      <p>Most complete. Inbox split into New / Pending / Snoozed / Done with separate counts; arrival banner merges bursts with swap/bump animations; "while you were away" summaries after quiet hours or snooze; threaded replies on code comments; time-jump menu. Polish gaps: tags truncate repo names, conversation panel stays tall on short threads, expanded diff keeps the narrow column.</p>
+    </a>
+    <a class="card" href="fable-5.1/index.html">
+      <div class="head"><strong>Fable 5.1</strong><span class="model">claude-fable-5-1 · xhigh</span></div>
+      <p>Strongest Fluid preset: notch and panel merge into one dark elastic surface with concave top fillets. Calm hangs a light Notification Center–style glass popover under the notch. Compact ~66px rows with reason chips; arrival card morphs in place during bursts.</p>
+    </a>
+    <a class="card" href="fable-5/index.html">
+      <div class="head"><strong>Fable 5</strong><span class="model">claude-fable-5 · xhigh</span></div>
+      <p>Smallest and most restrained (~54 KB). Clean list with avatar stacks and unseen dots, minimal demo bar. Thinner feature depth: no separate pending section, simpler conversation chrome, and cramped initials in overlapping avatar stacks.</p>
+    </a>
+  </div>
+
+  <h2>Try in each</h2>
+  <ul>
+    <li>Wait for the first arrival, then <em>Burst</em> — one card, rising count, no restarted animation.</li>
+    <li>Click the notch → open a group → expand a diff → reply → pin, click outside, press Escape.</li>
+    <li>Snooze a group, advance time, watch it return; mark done, then send activity to the done group.</li>
+    <li>Toggle quiet mode / quiet hours, Calm ↔ Fluid, and hardware notch ↔ floating pill.</li>
+  </ul>
+</main>
+</body>
+</html>
