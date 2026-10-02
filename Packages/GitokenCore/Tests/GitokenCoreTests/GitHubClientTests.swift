@@ -258,6 +258,41 @@ import Testing
         #expect(items[9].actor == Actor(login: "github-actions", name: "GitHub Actions", isBot: true))
     }
 
+    @Test func reactionGroupsMapToShownCountsAndSubjectNodeIDs() async throws {
+        let stub = StubServer { _ in .init(status: 200, body: fixture("graphql-pull-request")) }
+        let client = GitHubClient(tokens: StubTokens(), session: stub.session)
+        let items = try await client.threadDetail(for: thread(kind: .pullRequest, number: 142)).items
+
+        #expect(items[0].reactions == [
+            ReactionCount(content: .hooray, count: 1, viewerHasReacted: false),
+            ReactionCount(content: .rocket, count: 2, viewerHasReacted: true),
+        ], "empty groups and emoji Gitoken doesn't offer (😄) are dropped; order follows the picker")
+        #expect(items[0].reactionSubjectID == "PR_kwDOfixture142", "reacting to the description targets the PR node")
+        #expect(items[1].reactions == [ReactionCount(content: .eyes, count: 3, viewerHasReacted: false)])
+        #expect(items[1].reactionSubjectID == "IC_kwDOfixture1")
+        #expect(items[2].reactionSubjectID == nil, "commits can't be reacted to")
+        guard case .review(_, _, let comments) = items[6].payload else { return }
+        #expect(items[6].reactionSubjectID == "PRR_fixture1")
+        #expect(comments[0].reactions == [ReactionCount(content: .thumbsUp, count: 1, viewerHasReacted: true)])
+        #expect(comments[1].reactions.isEmpty)
+    }
+
+    @Test func addReactionSendsMutationForSubjectNode() async throws {
+        let stub = StubServer { _ in
+            .init(status: 200, body: Data(#"{"data":{"addReaction":{"reaction":{"content":"HEART"}}}}"#.utf8))
+        }
+        let client = GitHubClient(tokens: StubTokens(), session: stub.session)
+        try await client.addReaction(.heart, subjectID: "PRRC_fixture1")
+
+        let request = try #require(stub.requests.first)
+        #expect(request.url?.absoluteString == "https://api.github.com/graphql")
+        let sent = try JSONSerialization.jsonObject(with: try #require(request.httpBody)) as? [String: Any]
+        #expect((sent?["query"] as? String)?.contains("addReaction(input: {subjectId: $subjectId, content: $content})") == true)
+        let variables = sent?["variables"] as? [String: Any]
+        #expect(variables?["subjectId"] as? String == "PRRC_fixture1")
+        #expect(variables?["content"] as? String == "HEART")
+    }
+
     @Test func issueTimelineSkipsOpeningWhenTruncatedAndMapsEvents() async throws {
         let stub = StubServer { _ in .init(status: 200, body: fixture("graphql-issue")) }
         let client = GitHubClient(tokens: StubTokens(), session: stub.session)

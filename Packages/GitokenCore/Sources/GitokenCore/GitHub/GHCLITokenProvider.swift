@@ -128,25 +128,30 @@ enum ProcessResult: Sendable {
 
 enum ProcessRunner {
     /// Runs the executable on a background queue so callers on the main actor never block.
-    static func run(executable: String, arguments: [String], environment: [String: String], timeout: TimeInterval)
-        async -> ProcessResult
-    {
+    static func run(
+        executable: String, arguments: [String], environment: [String: String], timeout: TimeInterval,
+        currentDirectory: URL? = nil
+    ) async -> ProcessResult {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(
-                    returning: runBlocking(executable: executable, arguments: arguments, environment: environment, timeout: timeout)
+                    returning: runBlocking(
+                        executable: executable, arguments: arguments, environment: environment, timeout: timeout,
+                        currentDirectory: currentDirectory)
                 )
             }
         }
     }
 
     private static func runBlocking(
-        executable: String, arguments: [String], environment: [String: String], timeout: TimeInterval
+        executable: String, arguments: [String], environment: [String: String], timeout: TimeInterval,
+        currentDirectory: URL?
     ) -> ProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.environment = environment
+        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout

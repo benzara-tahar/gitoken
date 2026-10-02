@@ -7,8 +7,8 @@ import Synchronization
 public final class FixtureGitHubService: GitHubService {
     public static let pollInterval: TimeInterval = 60
 
-    private let now: any NowProvider
-    private let state: Mutex<State>
+    let now: any NowProvider
+    let state: Mutex<State>
 
     struct FixtureThread {
         let id: ThreadID
@@ -21,6 +21,8 @@ public final class FixtureGitHubService: GitHubService {
         var items: [TimelineItem]
 
         var repo: RepoRef { RepoRef(owner: "platform", name: subject.repo) }
+        /// Fictional GraphQL node id of the PR/issue (`addReaction` subject for its description).
+        var nodeID: String { "\(subject.kind == .pullRequest ? "PR" : "I")_fx\(id.rawValue)" }
 
         var notification: NotificationThread {
             let segment = subject.kind == .pullRequest ? "pulls" : "issues"
@@ -42,6 +44,10 @@ public final class FixtureGitHubService: GitHubService {
         var reopenCursor = 0
         /// Threads the client marked done, oldest call first.
         var doneCalls: [ThreadID] = []
+        /// `addReaction` calls in order, as (subject node id, content).
+        var reactions: [(subjectID: String, content: ReactionContent)] = []
+        /// PR Shelf pull requests (see `FixtureGitHubService+PullRequests.swift`).
+        var shelf: [FixtureShelfPR] = []
 
         func index(of key: String) -> Int? { threads.firstIndex { $0.subject.key == key } }
         func index(of id: ThreadID) -> Int? { threads.firstIndex { $0.id == id } }
@@ -57,6 +63,7 @@ public final class FixtureGitHubService: GitHubService {
         for seed in FixtureSeed.threads {
             Self.create(seed, relativeTo: start, in: &state)
         }
+        state.shelf = FixtureSeed.shelfPullRequests(relativeTo: start)
         self.state = Mutex(state)
     }
 
@@ -200,6 +207,24 @@ public final class FixtureGitHubService: GitHubService {
         return reply
     }
 
+    /// Records the call and adds the viewer's reaction to the matching description, comment, review, or review comment,
+    /// so the next `threadDetail` shows it like GitHub would.
+    public func addReaction(_ content: ReactionContent, subjectID: String) async throws(GitHubError) {
+        let found = state.withLock { state in
+            state.reactions.append((subjectID, content))
+            for t in state.threads.indices {
+                guard let items = state.threads[t].items.addingReaction(content, to: subjectID) else { continue }
+                state.threads[t].items = items
+                return true
+            }
+            return false
+        }
+        if !found { throw .graphQL(["Could not resolve to a node with the global id of '\(subjectID)'"]) }
+    }
+
+    /// `addReaction` calls so far, oldest first.
+    public var reactionCalls: [(subjectID: String, content: ReactionContent)] { state.withLock { $0.reactions } }
+
     // MARK: State building
 
     private static func threadID(for subject: FixtureSeed.Subject) -> ThreadID {
@@ -248,8 +273,13 @@ public final class FixtureGitHubService: GitHubService {
         let thread = state.threads[index]
         let url = thread.notification.htmlURL
         func append(_ payload: TimelinePayload) {
-            let id = "fx-item-\(state.nextItem)"
-            state.nextItem += 1
+            let id: String
+            if case .opened = payload {
+                id = "\(TimelineItem.openedPrefix)\(thread.nodeID)"
+            } else {
+                id = "fx-item-\(state.nextItem)"
+                state.nextItem += 1
+            }
             state.threads[index].items.append(TimelineItem(id: id, actor: actor, createdAt: at, payload: payload, url: url))
         }
 

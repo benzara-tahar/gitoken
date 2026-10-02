@@ -26,6 +26,8 @@ final class NotchModel {
 
     let store: InboxStore
     let sounds = SoundPlayer()
+    let openLocally: OpenLocallyCoordinator
+    let shelf: ShelfStore
 
     private(set) var route: Route = .collapsed
     var host: HostScreen = .fallback
@@ -47,6 +49,10 @@ final class NotchModel {
     var composerFocused = false
     /// Bumped to move keyboard focus into the reply composer.
     private(set) var composerFocusToken = 0
+    /// Settings is capturing a new global shortcut; the current one is unregistered meanwhile.
+    var isRecordingHotKey = false
+    /// Another app already owns `settings.hotKey`.
+    var hotKeyUnavailable = false
 
     func requestComposerFocus() { composerFocusToken += 1 }
     /// Last known frames (surface space) of menu-opening controls, keyed by menu anchor id.
@@ -56,6 +62,8 @@ final class NotchModel {
 
     init(store: InboxStore) {
         self.store = store
+        openLocally = OpenLocallyCoordinator(store: store)
+        shelf = store.makeShelfStore()
     }
 
     // MARK: Derived presentation

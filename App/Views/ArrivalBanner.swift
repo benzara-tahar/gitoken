@@ -43,7 +43,7 @@ struct ArrivalBannerView: View {
                 .accessibilityHint("Opens the conversation")
                 .debugNotchMenu(model)
         }
-        .frame(width: width, height: banded ? model.host.topInset + 66 : (theme.isFluid ? 70 : 66))
+        .frame(width: width, height: (banded ? model.host.topInset + 66 : (theme.isFluid ? 70 : 66)) + extraHeight)
         .onHover { hovering in
             if !hovering, model.bannerHovered { hoverEnded = true }
             model.bannerHovered = hovering
@@ -55,7 +55,7 @@ struct ArrivalBannerView: View {
             let seconds: Double
             if hoverEnded {
                 seconds = 2.4
-            } else if case .summary = arrival.kind {
+            } else if arrival.isSummary {
                 seconds = 5.6
             } else {
                 seconds = fresh ? 4.8 : 3.6
@@ -79,6 +79,17 @@ struct ArrivalBannerView: View {
                         insertion: .offset(y: 6).combined(with: .opacity), removal: .opacity
                     ))
                 lineTwo
+                if case .morningSummary(let summary) = arrival.kind {
+                    ForEach(shelfLines(summary), id: \.self) { line in
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.triangle.pull").foregroundStyle(theme.accent)
+                            Text(line).foregroundStyle(.secondary)
+                        }
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .padding(.top, 2)
+                    }
+                }
             }
             .animation(motion.pop, value: lineOneKey)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -125,7 +136,22 @@ struct ArrivalBannerView: View {
         case .activity(_, let latest, _): latest.verb.badge
         case .snoozeEnded: ActivityBadge(symbol: "clock", tone: .neutral)
         case .summary: nil
+        case .morningSummary: ActivityBadge(symbol: "sun.max.fill", tone: .warn)
         }
+    }
+
+    /// The morning summary lists up to three PR Shelf changes under its two lines.
+    private static let maxShelfLines = 3
+
+    private func shelfLines(_ summary: MorningSummary) -> [String] {
+        let shown = Array(summary.shelfChanges.prefix(Self.maxShelfLines))
+        let more = summary.shelfChanges.count - shown.count
+        return more > 0 ? shown + ["and \(Format.plural(more, "more shelf change"))"] : shown
+    }
+
+    private var extraHeight: CGFloat {
+        guard case .morningSummary(let summary) = arrival.kind else { return 0 }
+        return CGFloat(shelfLines(summary).count) * 18
     }
 
     private var lineOneKey: String {
@@ -134,6 +160,7 @@ struct ArrivalBannerView: View {
             "\(latest.actor?.login ?? "")|\(latest.verb.rawValue)|\(reopened)|\(latest.at.timeIntervalSince1970)"
         case .snoozeEnded(let id): "snooze|\(id)"
         case .summary(let updates, let groups, _, _): "summary|\(updates)|\(groups)"
+        case .morningSummary(let summary): "morning|\(summary.updates)|\(summary.conversations)"
         }
     }
 
@@ -156,6 +183,8 @@ struct ArrivalBannerView: View {
                 .lineLimit(1)
         case .summary(_, _, _, let reason):
             Text(summaryTitle(reason)).fontWeight(.semibold).font(font).lineLimit(1)
+        case .morningSummary(let summary):
+            Text(morningTitle(summary)).fontWeight(.semibold).font(font).lineLimit(1)
         }
     }
 
@@ -165,6 +194,11 @@ struct ArrivalBannerView: View {
         switch arrival.kind {
         case .summary(let updates, let groups, _, _):
             Text("\(Format.plural(updates, "update")) in \(Format.plural(groups, "conversation")) while you were away")
+                .font(font)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        case .morningSummary(let summary):
+            Text(repoLine(summary))
                 .font(font)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -195,6 +229,20 @@ struct ArrivalBannerView: View {
         }
     }
 
+    private func morningTitle(_ summary: MorningSummary) -> String {
+        guard summary.updates > 0 else { return "Good morning · PR Shelf changes" }
+        return "Overnight: \(Format.plural(summary.updates, "update")) in \(Format.plural(summary.conversations, "conversation"))"
+    }
+
+    /// "platform/web 4 · platform/api 3 · ui-kit 1": the owner is dropped once it repeats the first repo's.
+    private func repoLine(_ summary: MorningSummary) -> String {
+        guard let firstOwner = summary.topRepos.first?.repo.owner else { return "Nothing new in your inbox" }
+        return summary.topRepos.enumerated().map { index, entry in
+            let name = index > 0 && entry.repo.owner == firstOwner ? entry.repo.name : entry.repo.fullName
+            return "\(name) \(entry.updates)"
+        }.joined(separator: "  ·  ")
+    }
+
     private var accessibilityText: String {
         switch arrival.kind {
         case .activity(_, let latest, let reopened):
@@ -204,6 +252,8 @@ struct ArrivalBannerView: View {
         case .snoozeEnded: return "Snooze ended. \(group?.thread.title ?? "")"
         case .summary(let updates, let groups, _, let reason):
             return "\(summaryTitle(reason)). \(updates) updates in \(groups) conversations"
+        case .morningSummary(let summary):
+            return ([morningTitle(summary), repoLine(summary)] + summary.shelfChanges).joined(separator: ". ")
         }
     }
 }
@@ -219,5 +269,15 @@ private struct BannerTag: View {
             .padding(.vertical, 1)
             .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color(hex: 0xE39A00)))
             .fixedSize()
+    }
+}
+
+private extension Arrival {
+    /// Summaries carry more to read, so they stay up longer.
+    var isSummary: Bool {
+        switch kind {
+        case .summary, .morningSummary: true
+        case .activity, .snoozeEnded: false
+        }
     }
 }

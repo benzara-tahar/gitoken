@@ -14,15 +14,25 @@ struct GitokenApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: InboxStore?
     private var notch: NotchController?
+    private var shelf: ShelfController?
     private var power: PowerObserver?
+    #if DEBUG
+    private var fixtureSettings: FixtureSettingsPersistence?
+    #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = Self.makeStore()
         self.store = store
-        notch = NotchController(store: store)
+        #if DEBUG
+        if store.fixtureService != nil { fixtureSettings = FixtureSettingsPersistence(store: store) }
+        #endif
+        let notch = NotchController(store: store)
+        self.notch = notch
+        shelf = ShelfController(notch: notch.model)
+        let shelfStore = notch.model.shelf
         power = PowerObserver(
-            onPause: { store.pause() },
-            onResume: { store.resume() }
+            onPause: { store.pause(); shelfStore.pause() },
+            onResume: { store.resume(); shelfStore.resume() }
         )
         store.start()
     }

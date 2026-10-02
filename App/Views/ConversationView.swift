@@ -104,6 +104,9 @@ struct ConversationView: View {
                 if let checks = detail?.checks { checksChip(checks) }
                 if let review = latestReview(detail) { review }
                 if g.doneAt != nil { Chip(text: "Done", symbol: "checkmark") }
+                if let ref = model.pullRequestRef(g), model.shelf.status(for: ref)?.isReadyToMerge == true {
+                    Chip(text: "Ready to merge", symbol: "arrow.triangle.merge", tone: .success)
+                }
             }
             .padding(.bottom, 10)
 
@@ -121,7 +124,17 @@ struct ConversationView: View {
                 }
                 .menuAnchor($snoozeAnchor)
                 Spacer(minLength: 4)
-                PillButton(title: "Open on GitHub", symbol: "arrow.up.right.square", kind: .ghost) { model.openOnGitHub(id) }
+                if let ref = model.pullRequestRef(g) {
+                    let opening = model.openLocally.isOpening(ref)
+                    PillButton(title: opening ? "Opening…" : "Open locally", symbol: "laptopcomputer", kind: .ghost) {
+                        model.openPullRequestLocally(g)
+                    }
+                    .disabled(opening)
+                    .help("Check out \(ref.repo.fullName)#\(ref.number) in a worktree or your clone and open it in your editor")
+                    IconButton(symbol: "arrow.up.right.square", label: "Open on GitHub") { model.openOnGitHub(id) }
+                } else {
+                    PillButton(title: "Open on GitHub", symbol: "arrow.up.right.square", kind: .ghost) { model.openOnGitHub(id) }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -408,6 +421,9 @@ struct ComposerView: View {
     @State private var height: CGFloat = 28
     @State private var sending = false
     @State private var error: String?
+    @State private var repliesAnchor: CGRect = .zero
+
+    private var repliesMenuID: String { "composer-replies-\(group.id.rawValue)" }
 
     var body: some View {
         let target = model.replyTargets[group.id]
@@ -431,7 +447,7 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 6) {
                 ComposerTextView(
                     text: draft, height: $height, focusToken: model.composerFocusToken,
-                    onSubmit: { send(draft: draft) },
+                    onSubmit: { send(draft.wrappedValue, clearing: draft) },
                     onFocusChange: { model.composerFocused = $0 }
                 )
                 .frame(height: height)
@@ -444,7 +460,11 @@ struct ComposerView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                Button { send(draft: draft) } label: {
+                IconButton(
+                    symbol: "text.bubble", label: "Saved replies", active: model.menu?.anchorID == repliesMenuID, size: 28
+                ) { presentSavedReplies(draft: draft) }
+                .menuAnchor($repliesAnchor)
+                Button { send(draft.wrappedValue, clearing: draft) } label: {
                     Group {
                         if sending {
                             ProgressView().controlSize(.mini).tint(.white)
@@ -493,8 +513,35 @@ struct ComposerView: View {
         .overlay(alignment: .top) { Rectangle().fill(theme.hairline).frame(height: 0.5) }
     }
 
-    private func send(draft: Binding<String>) {
-        let body = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Pick one to put it in the composer, or send it as is in one click (in the reply thread, when one is chosen).
+    private func presentSavedReplies(draft: Binding<String>) {
+        let replies = model.settings.savedReplies.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        var items: [PanelMenu.Item] = []
+        if replies.isEmpty {
+            items.append(.label("No saved replies yet"))
+        } else {
+            items.append(.label("Insert"))
+            for reply in replies {
+                items.append(.action(Format.plain(reply, limit: 44), symbol: "text.insert") {
+                    let current = draft.wrappedValue
+                    draft.wrappedValue = current.isEmpty ? reply : current + (current.hasSuffix(" ") || current.hasSuffix("\n") ? "" : " ") + reply
+                    model.requestComposerFocus()
+                })
+            }
+            items.append(.separator)
+            items.append(.label(model.replyTargets[group.id] == nil ? "Send now" : "Send now in thread"))
+            for reply in replies {
+                items.append(.action(Format.plain(reply, limit: 44), symbol: "paperplane") { send(reply, clearing: nil) })
+            }
+        }
+        items.append(.separator)
+        items.append(.action("Edit saved replies…", symbol: "slider.horizontal.3") { model.open(.settings) })
+        model.presentMenu(PanelMenu(anchorID: repliesMenuID, anchor: repliesAnchor, items: items, opensUpward: true))
+    }
+
+    /// `clearing` is the draft to empty once GitHub accepts the reply; one-click saved replies leave the draft alone.
+    private func send(_ text: String, clearing draft: Binding<String>?) {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !sending else { return }
         let target = model.replyTargets[group.id]
         sending = true
@@ -503,7 +550,7 @@ struct ComposerView: View {
             do throws(GitHubError) {
                 onSent()
                 try await model.store.reply(to: group.id, body: body, inReplyTo: target)
-                draft.wrappedValue = ""
+                draft?.wrappedValue = ""
                 model.replyTargets[group.id] = nil
             } catch {
                 self.error = message(for: error)

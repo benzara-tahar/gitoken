@@ -17,6 +17,7 @@ final class NotchController {
     private var monitors: [Any] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var soundPolicy = SoundPolicy()
+    private var hotKey: GlobalHotKey?
 
     init(store: InboxStore) {
         model = NotchModel(store: store)
@@ -40,6 +41,7 @@ final class NotchController {
         installObservers()
         observeRoute()
         observeArrival()
+        hotKey = GlobalHotKey(model: model) { [model] in model.toggleFromHotKey() }
         panel.orderFrontRegardless()
         updateFullscreen()
     }
@@ -199,12 +201,15 @@ final class NotchController {
         static let up: UInt16 = 126
         static let down: UInt16 = 125
         static let left: UInt16 = 123
+        static let delete: UInt16 = 51
+        static let forwardDelete: UInt16 = 117
     }
 
     /// Returns nil when the event was consumed.
     private func handleKey(_ event: NSEvent) -> NSEvent? {
         guard event.window === panel else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if model.isRecordingHotKey { return recordHotKey(event) }
         if event.keyCode == Key.escape {
             if model.menu != nil { model.dismissMenu() } else { model.close() }
             return nil
@@ -227,10 +232,11 @@ final class NotchController {
         case .conversation(let id):
             if backShortcut { model.back(); return nil }
             if flags.isEmpty, chars == "r" { model.requestComposerFocus(); return nil }
-            if flags.isEmpty, chars == "d" {
+            if flags.isEmpty, chars == "d" || chars == "e" {
                 if model.group(id)?.doneAt != nil { model.undoDone(id) } else { model.markDone(id) }
                 return nil
             }
+            if flags.isEmpty, chars == "u", model.toast?.undo != nil { model.performToastUndo(); return nil }
             return event
         case .settings:
             if backShortcut { model.back(); return nil }
@@ -240,31 +246,55 @@ final class NotchController {
         }
     }
 
+    /// Settings' shortcut recorder: Esc cancels, Delete disables the shortcut, a key with ⌘/⌥/⌃ becomes it.
+    private func recordHotKey(_ event: NSEvent) -> NSEvent? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        switch event.keyCode {
+        case Key.escape where flags.isEmpty:
+            model.isRecordingHotKey = false
+        case Key.delete, Key.forwardDelete:
+            model.store.updateSettings { $0.hotKey = nil }
+            model.isRecordingHotKey = false
+        default:
+            guard let hotKey = HotKey(event: event) else {
+                NSSound.beep()
+                return nil
+            }
+            model.store.updateSettings { $0.hotKey = hotKey }
+            model.isRecordingHotKey = false
+        }
+        return nil
+    }
+
     private func handleListKey(_ event: NSEvent, chars: String, flags: NSEvent.ModifierFlags) -> Bool {
         guard flags.subtracting(.numericPad).subtracting(.function).isEmpty else { return false }
         let store = model.store
         let rows = Buckets(store: store, now: store.now.now()).visible(showSnoozed: model.showSnoozed, showDone: model.showDone)
         let index = model.selectedRow.flatMap { id in rows.firstIndex { $0.id == id } }
-        switch event.keyCode {
-        case Key.down:
+        if event.keyCode == Key.down || chars == "j" {
             guard !rows.isEmpty else { return true }
             model.selectedRow = rows[min(rows.count - 1, (index ?? -1) + 1)].id
             return true
-        case Key.up:
+        }
+        if event.keyCode == Key.up || chars == "k" {
             guard !rows.isEmpty else { return true }
             model.selectedRow = rows[max(0, (index ?? rows.count) - 1)].id
             return true
-        case Key.returnKey, Key.enter:
+        }
+        if event.keyCode == Key.returnKey || event.keyCode == Key.enter {
             if let index { model.open(.conversation(rows[index].id)) }
             return true
-        default:
-            break
+        }
+        // U undoes the last action (done, snooze, mute) while its toast is up, else unsnoozes / restores the row.
+        if chars == "u", model.toast?.undo != nil {
+            model.performToastUndo()
+            return true
         }
         guard let index else { return false }
         let group = rows[index]
         let bucket = group.bucket(at: store.now.now())
         switch chars {
-        case "d", "e":
+        case "e", "d":
             let next = rows.indices.contains(index + 1) ? rows[index + 1].id : (index > 0 ? rows[index - 1].id : nil)
             if bucket == .done { model.undoDone(group.id) } else { model.markDone(group.id) }
             model.selectedRow = next
@@ -273,7 +303,7 @@ final class NotchController {
             if bucket == .new || bucket == .pending { model.presentSnoozeMenu(for: group.id) }
             return true
         case "u":
-            if bucket == .snoozed { model.unsnooze(group.id) }
+            if bucket == .snoozed { model.unsnooze(group.id) } else if bucket == .done { model.undoDone(group.id) }
             return true
         default:
             return false

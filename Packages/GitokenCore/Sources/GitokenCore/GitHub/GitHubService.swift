@@ -63,4 +63,8 @@ public protocol GitHubService: Sendable {
     /// `POST /repos/{owner}/{repo}/pulls/{number}/comments/{commentID}/replies`.
     func replyToReviewComment(repo: RepoRef, number: Int, commentDatabaseID: Int, body: String) async throws(GitHubError)
         -> ReviewComment
+
+    /// GraphQL `addReaction(input: {subjectId, content})`. `subjectID` is the node id of the PR/issue, comment,
+    /// review, or review comment.
+    func addReaction(_ content: ReactionContent, subjectID: String) async throws(GitHubError)
 }

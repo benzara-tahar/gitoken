@@ -34,6 +34,11 @@ public final class InboxStore {
 
     /// Non-nil only for `preview()` stores: the debug menu drives scripted arrivals through it, then calls `refresh()`.
     public private(set) var fixtureService: FixtureGitHubService?
+    /// Set by `makeShelfStore()`.
+    public internal(set) var shelfStore: ShelfStore?
+    /// PR Shelf changes since quiet hours began, e.g. "#142 is ready to merge". Called once, when the morning summary is
+    /// published; set by `makeShelfStore()`.
+    @ObservationIgnored public var overnightShelfLines: (@MainActor () -> [String])?
 
     public let now: any NowProvider
 
@@ -53,14 +58,20 @@ public final class InboxStore {
 
     /// Pauses polling (system sleep / screen lock). Idempotent.
     public func pause() {
+        isAway = true
         guard isStarted, !isPaused else { return }
         isPaused = true
         pollLoop.stop()
     }
 
-    /// Resumes polling and polls immediately (wake / unlock). Idempotent.
+    /// Resumes polling and polls immediately (wake / unlock); publishes a morning summary held back while away.
+    /// Idempotent.
     public func resume() {
-        guard isStarted, isPaused else { return }
+        isAway = false
+        guard isStarted, isPaused else {
+            syncQuietState()
+            return
+        }
         isPaused = false
         tick()
         startPolling(after: .zero)
@@ -95,7 +106,7 @@ public final class InboxStore {
             row.snoozedUntil = nil
             row.resurfaced = .snoozeEnded
             changed.append(row)
-            if currentQuietReason == nil {
+            if currentQuietReason == nil, !settings.muteRules.mutes(row.thread) {
                 arrivals.enqueue(Arrival(kind: .snoozeEnded(groupID: row.id), updateCount: 1, actors: row.actors))
             }
         }
@@ -109,7 +120,7 @@ public final class InboxStore {
     public private(set) var lastSyncAt: Date?
     public private(set) var lastSyncError: GitHubError?
 
-    /// All in-scope groups, newest activity first.
+    /// All in-scope, unmuted groups, newest activity first.
     public private(set) var groups: [InboxGroup] = []
     public func groups(in bucket: InboxBucket) -> [InboxGroup] {
         let current = now.now()
@@ -125,10 +136,30 @@ public final class InboxStore {
         change(&next)
         guard next != settings else { return }
         let reanalyze = next.notifyAIReviews != settings.notifyAIReviews
+        let muteChanged = next.muteRules != settings.muteRules
         settings = next
+        if muteChanged { applyMuteRules() }
         saveAppState()
         syncQuietState()
         if reanalyze { reabsorbCachedDetails() }
+    }
+
+    /// Hides matching groups from the inbox, counts, arrivals, and sounds. Their activity keeps being tracked, so
+    /// `unmute` brings them back as they are on GitHub.
+    public func mute(_ rule: MuteRule) {
+        updateSettings { if !$0.muteRules.contains(rule) { $0.muteRules.append(rule) } }
+    }
+
+    public func unmute(_ rule: MuteRule) {
+        updateSettings { $0.muteRules.removeAll { $0 == rule } }
+    }
+
+    private func applyMuteRules() {
+        let muted = Set(rows.values.filter { settings.muteRules.mutes($0.thread) }.map(\.id))
+        for id in muted { arrivals.remove(groupID: id) }
+        collected.remove(muted)
+        rebuildGroups()
+        publishArrival()
     }
 
     /// Re-derives previews/participants/unseen counts from cached timelines after the AI-review policy changed.
@@ -285,6 +316,30 @@ public final class InboxStore {
         saveDetail(updated, account: account)
     }
 
+    /// Adds the viewer's reaction to the description, a comment, a review, or a review comment (`subjectID` is its node
+    /// id, see `TimelineItem.reactionSubjectID`). The conversation shows it immediately; a refusal rolls it back.
+    public func addReaction(_ content: ReactionContent, to subjectID: String, in id: ThreadID) async throws(GitHubError) {
+        let account = account
+        let before = conversations[id]?.detail ?? account.flatMap { cachedDetail(id, account: $0) }
+        let optimistic = before.flatMap { detail in
+            detail.items.addingReaction(content, to: subjectID).map { detail.replacingItems($0) }
+        }
+        if let optimistic { show(optimistic, for: id, account: account) }
+        do throws(GitHubError) {
+            try await service.addReaction(content, subjectID: subjectID)
+        } catch {
+            if let before, let optimistic, conversations[id]?.detail ?? optimistic == optimistic {
+                show(before, for: id, account: account)
+            }
+            throw error
+        }
+    }
+
+    private func show(_ detail: ThreadDetail, for id: ThreadID, account: AccountKey?) {
+        if conversations[id] != nil { conversations[id]?.detail = detail }
+        if let account { saveDetail(detail, account: account) }
+    }
+
     // MARK: Wiring
 
     static let minimumPollInterval: TimeInterval = 60
@@ -297,9 +352,9 @@ public final class InboxStore {
 
     private static let log = Logger(subsystem: "io.github.benzara-tahar.Gitoken", category: "InboxStore")
 
-    private let service: any GitHubService
+    let service: any GitHubService
     private let tokens: (any TokenProvider)?
-    private let database: GitokenDatabase
+    let database: GitokenDatabase
     let calendar: Calendar
 
     @ObservationIgnored private var rows: [ThreadID: TrackedThread] = [:]
@@ -315,6 +370,8 @@ public final class InboxStore {
     @ObservationIgnored private var needsViewerCheck = true
     @ObservationIgnored private var isStarted = false
     @ObservationIgnored private var isPaused = false
+    /// Mac asleep or locked (`pause()` until `resume()`), whether or not polling has started.
+    @ObservationIgnored private var isAway = false
     private let pollLoop = RepeatingTask()
     private let ticker = RepeatingTask()
     @ObservationIgnored private var inFlightPoll: Task<Void, Never>?
@@ -348,7 +405,7 @@ public final class InboxStore {
             phase = .ready(viewer: viewer)
             rows = loadRows(for: AccountKey(login: viewer.login))
         }
-        syncQuietState()
+        syncQuietState(live: false)
         rebuildGroups()
     }
 
@@ -545,11 +602,13 @@ public final class InboxStore {
     /// Hydrates every announceable change plus a bounded backfill of rows never hydrated, then folds the timelines
     /// into the rows. Returns the details fetched this round.
     private func hydrate(_ changes: [ThreadChange], account: AccountKey, viewer: Actor) async -> [ThreadID: ThreadDetail] {
+        let muteRules = settings.muteRules
         let urgentIDs = changes.filter(\.announce).map(\.id)
-        let urgent = urgentIDs.compactMap { rows[$0] }.filter(\.needsHydration)
+        let urgent = urgentIDs.compactMap { rows[$0] }.filter { $0.needsHydration && !muteRules.mutes($0.thread) }
         let urgentSet = Set(urgentIDs)
+        // Muted rows stay unhydrated until unmuted; the next poll's backfill catches them up.
         let backfill = rows.values
-            .filter { !urgentSet.contains($0.id) && $0.doneAt == nil && $0.needsHydration }
+            .filter { !urgentSet.contains($0.id) && $0.doneAt == nil && $0.needsHydration && !muteRules.mutes($0.thread) }
             .sorted { a, b in
                 a.isUnseen != b.isUnseen ? a.isUnseen : a.thread.updatedAt > b.thread.updatedAt
             }
@@ -584,7 +643,8 @@ public final class InboxStore {
         let current = now.now()
         var collectedChanged = false
         for change in changes where change.announce {
-            guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current) else { continue }
+            guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current),
+                  !settings.muteRules.mutes(row.thread) else { continue }
             let includeAI = settings.notifyAIReviews
             let fresh = details[change.id].map {
                 ActivityAnalysis.items(in: $0, byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
@@ -661,7 +721,9 @@ public final class InboxStore {
 
     /// Tracks quiet transitions. Entering quiet folds waiting arrivals into the collected summary and hides the
     /// current one; leaving quiet publishes the summary if anything was collected (also after a relaunch).
-    private func syncQuietState() {
+    /// When scheduled quiet hours end, a morning summary replaces it; that one waits for a `live` call while the Mac is
+    /// in use (not during init, which runs before the PR Shelf is wired, nor while asleep/locked), so it is seen.
+    private func syncQuietState(live: Bool = true) {
         let reason = QuietPolicy.reason(
             now: now.now(), globalSnoozeUntil: globalSnoozeUntil, manualQuiet: manualQuiet,
             quietHours: settings.quietHours, calendar: calendar)
@@ -679,14 +741,30 @@ public final class InboxStore {
                 collectedChanged = true
             }
         } else if let endedReason = collectedReason {
-            if !collected.isEmpty { arrivals.enqueue(collected.summary(endedReason: endedReason)) }
-            collected = CollectedActivity()
-            collectedReason = nil
-            collectedChanged = true
+            let morning = if case .quietHours = endedReason { true } else { false }
+            if !morning || (live && !isAway) {
+                if morning {
+                    publishMorningSummary()
+                } else if !collected.isEmpty {
+                    arrivals.enqueue(collected.summary(endedReason: endedReason))
+                }
+                collected = CollectedActivity()
+                collectedReason = nil
+                collectedChanged = true
+            }
         }
 
         if collectedChanged { saveAppState() }
         publishArrival()
+    }
+
+    private func publishMorningSummary() {
+        let muteRules = settings.muteRules
+        let summary = collected.morningSummary(
+            repo: { id in self.rows[id].flatMap { muteRules.mutes($0.thread) ? nil : $0.thread.repo } },
+            shelfChanges: overnightShelfLines?() ?? [])
+        guard !summary.isEmpty else { return }
+        arrivals.enqueue(Arrival(kind: .morningSummary(summary), updateCount: 1, actors: summary.actors))
     }
 
     private func publishArrival() {
@@ -725,7 +803,8 @@ public final class InboxStore {
     }
 
     private func rebuildGroups() {
-        let next = rows.values.map(\.group).sorted { a, b in
+        let muteRules = settings.muteRules
+        let next = rows.values.filter { !muteRules.mutes($0.thread) }.map(\.group).sorted { a, b in
             a.lastActivityAt != b.lastActivityAt ? a.lastActivityAt > b.lastActivityAt : a.id.rawValue < b.id.rawValue
         }
         if next != groups { groups = next }
@@ -784,10 +863,7 @@ extension ThreadDetail {
         for index in items.indices {
             guard case .review(let state, let body, let comments) = items[index].payload,
                   comments.contains(where: { $0.id == parent.id }) else { continue }
-            let item = items[index]
-            items[index] = TimelineItem(
-                id: item.id, actor: item.actor, createdAt: item.createdAt,
-                payload: .review(state: state, body: body, comments: comments + [comment]), url: item.url)
+            items[index] = items[index].with(payload: .review(state: state, body: body, comments: comments + [comment]))
             return replacingItems(items)
         }
         return appending(TimelineItem(

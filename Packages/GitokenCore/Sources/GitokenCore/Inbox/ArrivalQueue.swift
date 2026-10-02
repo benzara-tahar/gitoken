@@ -59,12 +59,15 @@ struct CollectedActivity: Equatable, Sendable {
     var groupIDs: [ThreadID] = []
     /// Newest last, at most 3.
     var actors: [Actor] = []
+    /// Updates per group; groups collected before this was tracked count once.
+    var groupUpdates: [ThreadID: Int] = [:]
 
     var isEmpty: Bool { updates == 0 }
 
     mutating func add(groupID: ThreadID, count: Int, actors newActors: [Actor]) {
         updates += count
         if !groupIDs.contains(groupID) { groupIDs.append(groupID) }
+        groupUpdates[groupID, default: 0] += count
         actors = actors.merging(newActors)
     }
 
@@ -74,8 +77,36 @@ struct CollectedActivity: Equatable, Sendable {
         add(groupID: groupID, count: arrival.updateCount, actors: arrival.actors)
     }
 
+    /// Drops groups that were muted after their activity was collected.
+    mutating func remove(_ ids: Set<ThreadID>) {
+        for id in groupIDs where ids.contains(id) { updates -= groupUpdates[id] ?? 1 }
+        updates = max(0, updates)
+        groupIDs.removeAll { ids.contains($0) }
+        for id in ids { groupUpdates[id] = nil }
+    }
+
     func summary(endedReason: QuietReason) -> Arrival {
         Arrival(kind: .summary(updates: updates, groups: groupIDs.count, actors: actors, endedReason: endedReason),
                 updateCount: 1, actors: actors)
+    }
+
+    /// Groups `repo` can't place (forgotten, or muted since) are left out of every count.
+    func morningSummary(repo: (ThreadID) -> RepoRef?, shelfChanges: [String]) -> MorningSummary {
+        var byRepo: [RepoRef: Int] = [:]
+        var updates = 0
+        var conversations = 0
+        for id in groupIDs {
+            guard let repo = repo(id) else { continue }
+            let count = groupUpdates[id] ?? 1
+            byRepo[repo, default: 0] += count
+            updates += count
+            conversations += 1
+        }
+        let topRepos = byRepo
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key.fullName < $1.key.fullName }
+            .prefix(MorningSummary.maxRepos)
+            .map { MorningSummary.RepoUpdates(repo: $0.key, updates: $0.value) }
+        return MorningSummary(
+            updates: updates, conversations: conversations, topRepos: topRepos, shelfChanges: shelfChanges, actors: actors)
     }
 }

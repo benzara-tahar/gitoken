@@ -47,7 +47,7 @@ public struct SoundPolicy: Sendable {
         lastPlayedAt = now
         let scale: Double = switch arrival.kind {
         case .activity: 1
-        case .snoozeEnded, .summary: Self.reminderVolumeScale
+        case .snoozeEnded, .summary, .morningSummary: Self.reminderVolumeScale
         }
         return SoundCue(sound: settings.sound, volume: min(1, settings.soundVolume) * scale)
     }

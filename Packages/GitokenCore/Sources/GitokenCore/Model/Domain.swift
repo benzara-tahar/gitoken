@@ -219,9 +219,10 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
     /// Node id of the comment this one replies to, when threaded.
     public let replyToID: String?
     public let url: URL?
+    public let reactions: [ReactionCount]
     public init(
         id: String, databaseID: Int, author: Actor, body: RichBody, createdAt: Date, path: String, diffHunk: String,
-        line: Int?, replyToID: String?, url: URL?
+        line: Int?, replyToID: String?, url: URL?, reactions: [ReactionCount] = []
     ) {
         self.id = id
         self.databaseID = databaseID
@@ -233,6 +234,33 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
         self.line = line
         self.replyToID = replyToID
         self.url = url
+        self.reactions = reactions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, databaseID, author, body, createdAt, path, diffHunk, line, replyToID, url, reactions
+    }
+
+    /// `reactions` was added after timelines were first cached; older rows decode with none.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        databaseID = try c.decode(Int.self, forKey: .databaseID)
+        author = try c.decode(Actor.self, forKey: .author)
+        body = try c.decode(RichBody.self, forKey: .body)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        path = try c.decode(String.self, forKey: .path)
+        diffHunk = try c.decode(String.self, forKey: .diffHunk)
+        line = try c.decodeIfPresent(Int.self, forKey: .line)
+        replyToID = try c.decodeIfPresent(String.self, forKey: .replyToID)
+        url = try c.decodeIfPresent(URL.self, forKey: .url)
+        reactions = try c.decodeIfPresent([ReactionCount].self, forKey: .reactions) ?? []
+    }
+
+    public func with(reactions: [ReactionCount]) -> ReviewComment {
+        ReviewComment(
+            id: id, databaseID: databaseID, author: author, body: body, createdAt: createdAt, path: path, diffHunk: diffHunk,
+            line: line, replyToID: replyToID, url: url, reactions: reactions)
     }
 }
 
@@ -256,12 +284,48 @@ public struct TimelineItem: Hashable, Codable, Sendable, Identifiable {
     public let createdAt: Date
     public let payload: TimelinePayload
     public let url: URL?
-    public init(id: String, actor: Actor, createdAt: Date, payload: TimelinePayload, url: URL?) {
+    /// Reactions on the item itself (description, comment, or review body). Review comments carry their own.
+    public let reactions: [ReactionCount]
+    public init(
+        id: String, actor: Actor, createdAt: Date, payload: TimelinePayload, url: URL?, reactions: [ReactionCount] = []
+    ) {
         self.id = id
         self.actor = actor
         self.createdAt = createdAt
         self.payload = payload
         self.url = url
+        self.reactions = reactions
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, actor, createdAt, payload, url, reactions }
+
+    /// `reactions` was added after timelines were first cached; older rows decode with none.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        actor = try c.decode(Actor.self, forKey: .actor)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        payload = try c.decode(TimelinePayload.self, forKey: .payload)
+        url = try c.decodeIfPresent(URL.self, forKey: .url)
+        reactions = try c.decodeIfPresent([ReactionCount].self, forKey: .reactions) ?? []
+    }
+
+    /// Node id `addReaction` targets: the PR/issue for the description (ids are `opened-<node id>`), the comment or
+    /// review itself otherwise. Commits, checks, and events can't be reacted to.
+    public var reactionSubjectID: String? {
+        switch payload {
+        case .opened: id.hasPrefix(Self.openedPrefix) ? String(id.dropFirst(Self.openedPrefix.count)) : nil
+        case .comment, .review: id
+        case .commits, .checks, .event: nil
+        }
+    }
+
+    public static let openedPrefix = "opened-"
+
+    public func with(payload: TimelinePayload? = nil, reactions: [ReactionCount]? = nil) -> TimelineItem {
+        TimelineItem(
+            id: id, actor: actor, createdAt: createdAt, payload: payload ?? self.payload, url: url,
+            reactions: reactions ?? self.reactions)
     }
 }
 

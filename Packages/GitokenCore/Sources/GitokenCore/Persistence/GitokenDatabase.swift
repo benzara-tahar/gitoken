@@ -93,6 +93,13 @@ final class GitokenDatabase: Sendable {
                     arguments: [try StorageJSON.encode(cleaned), row["rowid"] as Int64])
             }
         }
+        migrator.registerMigration("v3-morning-summary") { db in
+            try db.alter(table: AppStateRow.databaseTableName) { t in
+                // JSON {threadID: updates}; NULL for rows written before the morning summary existed.
+                t.add(column: "collectedGroupUpdates", .text)
+            }
+        }
+        registerShelfMigration(in: &migrator)
         return migrator
     }
 
@@ -193,7 +200,7 @@ private enum StoredQuietReason: Codable {
 // MARK: - Records
 
 /// JSON columns use Foundation's default date strategy (seconds since 2001 as Double), so dates round-trip exactly.
-private enum StorageJSON {
+enum StorageJSON {
     static func encode(_ value: some Encodable) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -306,10 +313,12 @@ private struct AppStateRow: FetchableRecord, PersistableRecord {
         state.globalSnoozeUntil = Date(storageValue: row["globalSnoozeUntil"])
         state.lastModified = row["lastModified"]
         state.viewer = try StorageJSON.decodeIfPresent(Actor.self, from: row["viewer"])
+        let groupUpdates = try StorageJSON.decodeIfPresent([String: Int].self, from: row["collectedGroupUpdates"]) ?? [:]
         state.collected = CollectedActivity(
             updates: row["collectedUpdates"],
             groupIDs: try StorageJSON.decode([ThreadID].self, from: row["collectedGroups"]),
-            actors: try StorageJSON.decode([Actor].self, from: row["collectedActors"]))
+            actors: try StorageJSON.decode([Actor].self, from: row["collectedActors"]),
+            groupUpdates: Dictionary(uniqueKeysWithValues: groupUpdates.map { (ThreadID($0.key), $0.value) }))
         state.collectedReason = try StorageJSON.decodeIfPresent(StoredQuietReason.self, from: row["collectedReason"])?.reason
         self.state = state
     }
@@ -324,6 +333,8 @@ private struct AppStateRow: FetchableRecord, PersistableRecord {
         container["collectedUpdates"] = state.collected.updates
         container["collectedGroups"] = try StorageJSON.encode(state.collected.groupIDs)
         container["collectedActors"] = try StorageJSON.encode(state.collected.actors)
+        container["collectedGroupUpdates"] = try StorageJSON.encode(
+            Dictionary(uniqueKeysWithValues: state.collected.groupUpdates.map { ($0.key.rawValue, $0.value) }))
         container["collectedReason"] = try state.collectedReason.map { try StorageJSON.encode(StoredQuietReason($0)) }
     }
 }

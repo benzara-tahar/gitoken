@@ -10,6 +10,12 @@
         "url": "https://github.com/platform/web/pull/142",
         "body": "Typing in global search fires a request per keystroke. This debounces the input (250ms) and memoizes `ResultRow`.\n\nCloses #131.",
         "createdAt": "2026-09-29T12:20:00Z",
+        "reactionGroups": [
+          { "content": "THUMBS_UP", "viewerHasReacted": false, "reactors": { "totalCount": 0 } },
+          { "content": "ROCKET", "viewerHasReacted": true, "reactors": { "totalCount": 2 } },
+          { "content": "LAUGH", "viewerHasReacted": false, "reactors": { "totalCount": 4 } },
+          { "content": "HOORAY", "viewerHasReacted": false, "reactors": { "totalCount": 1 } }
+        ],
         "author": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
         "timelineItems": {
           "pageInfo": { "hasPreviousPage": false },
@@ -22,7 +28,10 @@
               "bodyHTML": "<p dir=\"auto\">Did you check the <code class=\"notranslate\">?q=</code> deep-link flow?</p>",
               "bodyText": "Did you check the ?q= deep-link flow?",
               "createdAt": "2026-09-29T13:00:00Z",
-              "url": "https://github.com/platform/web/pull/142#issuecomment-5001"
+              "url": "https://github.com/platform/web/pull/142#issuecomment-5001",
+              "reactionGroups": [
+                { "content": "EYES", "viewerHasReacted": false, "reactors": { "totalCount": 3 } }
+              ]
             },
             {
               "__typename": "PullRequestCommit",
@@ -93,7 +102,10 @@
                     "line": 37,
                     "originalLine": 37,
                     "replyTo": null,
-                    "url": "https://github.com/platform/web/pull/142#discussion_r9001"
+                    "url": "https://github.com/platform/web/pull/142#discussion_r9001",
+                    "reactionGroups": [
+                      { "content": "THUMBS_UP", "viewerHasReacted": true, "reactors": { "totalCount": 1 } }
+                    ]
                   },
                   {
                     "id": "PRRC_fixture2",

@@ -154,6 +154,12 @@ struct SettingsView: View {
                 }
             }
 
+            InboxSettingsSections()
+
+            ShelfSettingsSection()
+
+            OpenLocallySettingsSection()
+
             section("General") {
                 card {
                     row("Launch at login", detail: loginDetail) {

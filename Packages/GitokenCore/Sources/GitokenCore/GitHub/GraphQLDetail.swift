@@ -6,22 +6,24 @@ enum GraphQLQueries {
         """
 
     private static let reviewCommentFields = """
-        id databaseId author { ...ActorFields } body bodyHTML bodyText createdAt path diffHunk line originalLine replyTo { id } url
+        id databaseId author { ...ActorFields } body bodyHTML bodyText createdAt path diffHunk line originalLine replyTo { id } url \(reactionFields)
         """
+
+    private static let reactionFields = "reactionGroups { content viewerHasReacted reactors { totalCount } }"
 
     static let pullRequest = """
         query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
           repository(owner: $owner, name: $name) {
             pullRequest(number: $number) {
-              id title state isDraft merged url body bodyHTML bodyText createdAt
+              id title state isDraft merged url body bodyHTML bodyText createdAt \(reactionFields)
               author { ...ActorFields }
               timelineItems(last: 60, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_COMMIT, REVIEW_REQUESTED_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, HEAD_REF_FORCE_PUSHED_EVENT]) {
                 pageInfo { hasPreviousPage }
                 nodes {
                   __typename
-                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url }
+                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url \(reactionFields) }
                   ... on PullRequestReview {
-                    id author { ...ActorFields } body bodyHTML bodyText state createdAt url
+                    id author { ...ActorFields } body bodyHTML bodyText state createdAt url \(reactionFields)
                     comments(first: 30) { nodes { \(reviewCommentFields) } }
                   }
                   ... on PullRequestCommit {
@@ -67,13 +69,13 @@ enum GraphQLQueries {
         query IssueDetail($owner: String!, $name: String!, $number: Int!) {
           repository(owner: $owner, name: $name) {
             issue(number: $number) {
-              id title state url body bodyHTML bodyText createdAt
+              id title state url body bodyHTML bodyText createdAt \(reactionFields)
               author { ...ActorFields }
               timelineItems(last: 60, itemTypes: [ISSUE_COMMENT, CLOSED_EVENT, REOPENED_EVENT, ASSIGNED_EVENT]) {
                 pageInfo { hasPreviousPage }
                 nodes {
                   __typename
-                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url }
+                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url \(reactionFields) }
                   ... on ClosedEvent { id actor { ...ActorFields } createdAt }
                   ... on ReopenedEvent { id actor { ...ActorFields } createdAt }
                   ... on AssignedEvent {
@@ -87,6 +89,12 @@ enum GraphQLQueries {
         }
         \(actorFragment)
         """
+
+    static let addReaction = """
+        mutation AddReaction($subjectId: ID!, $content: ReactionContent!) {
+          addReaction(input: {subjectId: $subjectId, content: $content}) { reaction { content } }
+        }
+        """
 }
 
 struct GraphQLRequest<Variables: Encodable>: Encodable {
@@ -98,6 +106,19 @@ struct SubjectVariables: Encodable {
     let owner: String
     let name: String
     let number: Int
+}
+
+struct AddReactionVariables: Encodable {
+    let subjectId: String
+    let content: String
+}
+
+struct GQLAddReactionData: Decodable {
+    struct Payload: Decodable {
+        struct Reaction: Decodable { let content: String }
+        let reaction: Reaction?
+    }
+    let addReaction: Payload?
 }
 
 struct GraphQLResponse<Payload: Decodable>: Decodable {
@@ -140,14 +161,36 @@ struct GQLReviewComment: Decodable {
     let originalLine: Int?
     let replyTo: GQLNodeRef?
     let url: String?
+    let reactionGroups: [GQLReactionGroup]?
 
     var reviewComment: ReviewComment {
         ReviewComment(
             id: id, databaseID: databaseId ?? 0, author: author?.actor ?? .ghost,
             body: RichBody(markdown: body, html: bodyHTML, plain: bodyText), createdAt: createdAt,
             path: path, diffHunk: diffHunk, line: line ?? originalLine, replyToID: replyTo?.id,
-            url: url.flatMap(URL.init(string:))
+            url: url.flatMap(URL.init(string:)), reactions: GQLReactionGroup.counts(reactionGroups)
         )
+    }
+}
+
+struct GQLReactionGroup: Decodable {
+    struct Reactors: Decodable { let totalCount: Int }
+    let content: String
+    let viewerHasReacted: Bool
+    let reactors: Reactors
+
+    /// Non-empty groups Gitoken can show, in `ReactionContent` order (👎 😄 aren't offered, so they're dropped).
+    static func counts(_ groups: [GQLReactionGroup]?) -> [ReactionCount] {
+        let byContent = Dictionary(
+            (groups ?? []).compactMap { group in
+                ReactionContent(rawValue: group.content).flatMap { content in
+                    group.reactors.totalCount > 0
+                        ? (content, ReactionCount(content: content, count: group.reactors.totalCount, viewerHasReacted: group.viewerHasReacted))
+                        : nil
+                }
+            },
+            uniquingKeysWith: { first, _ in first })
+        return ReactionContent.allCases.compactMap { byContent[$0] }
     }
 }
 
@@ -191,11 +234,12 @@ struct GQLTimelineNode: Decodable {
     let mergeCommit: MergeCommit?
     let requestedReviewer: GQLLoginRef?
     let assignee: GQLLoginRef?
+    let reactionGroups: [GQLReactionGroup]?
 
     enum CodingKeys: String, CodingKey {
         case typename = "__typename", id, author, actor, body, bodyHTML, bodyText, state, createdAt, url, comments, commit
         case mergeCommit
-        case requestedReviewer, assignee
+        case requestedReviewer, assignee, reactionGroups
     }
 
     var richBody: RichBody { RichBody(markdown: body ?? "", html: bodyHTML, plain: bodyText) }
@@ -258,6 +302,7 @@ struct GQLPullRequest: Decodable {
     let author: GQLActor?
     let timelineItems: GQLTimeline
     let commits: GQLNodes<GQLLastCommit>
+    let reactionGroups: [GQLReactionGroup]?
 
     var richBody: RichBody { RichBody(markdown: body, html: bodyHTML, plain: bodyText) }
 }
@@ -273,6 +318,7 @@ struct GQLIssue: Decodable {
     let createdAt: Date
     let author: GQLActor?
     let timelineItems: GQLTimeline
+    let reactionGroups: [GQLReactionGroup]?
 
     var richBody: RichBody { RichBody(markdown: body, html: bodyHTML, plain: bodyText) }
 }
@@ -295,7 +341,9 @@ enum TimelineMapper {
         let url = URL(string: pr.url)
         var items: [TimelineItem] = []
         if !pr.timelineItems.pageInfo.hasPreviousPage {
-            items.append(opened(id: pr.id, author: author, body: pr.richBody, createdAt: pr.createdAt, url: url))
+            items.append(opened(
+                id: pr.id, author: author, body: pr.richBody, createdAt: pr.createdAt, url: url,
+                reactions: GQLReactionGroup.counts(pr.reactionGroups)))
         }
         for node in pr.timelineItems.nodes.compactMap({ $0 }) {
             append(node, to: &items)
@@ -335,7 +383,9 @@ enum TimelineMapper {
         let url = URL(string: issue.url)
         var items: [TimelineItem] = []
         if !issue.timelineItems.pageInfo.hasPreviousPage {
-            items.append(opened(id: issue.id, author: author, body: issue.richBody, createdAt: issue.createdAt, url: url))
+            items.append(opened(
+                id: issue.id, author: author, body: issue.richBody, createdAt: issue.createdAt, url: url,
+                reactions: GQLReactionGroup.counts(issue.reactionGroups)))
         }
         for node in issue.timelineItems.nodes.compactMap({ $0 }) {
             append(node, to: &items)
@@ -347,8 +397,12 @@ enum TimelineMapper {
         )
     }
 
-    private static func opened(id: String, author: Actor, body: RichBody, createdAt: Date, url: URL?) -> TimelineItem {
-        TimelineItem(id: "opened-\(id)", actor: author, createdAt: createdAt, payload: .opened(body: body), url: url)
+    private static func opened(id: String, author: Actor, body: RichBody, createdAt: Date, url: URL?, reactions: [ReactionCount])
+        -> TimelineItem
+    {
+        TimelineItem(
+            id: "\(TimelineItem.openedPrefix)\(id)", actor: author, createdAt: createdAt, payload: .opened(body: body), url: url,
+            reactions: reactions)
     }
 
     private static func append(_ node: GQLTimelineNode, to items: inout [TimelineItem]) {
@@ -366,14 +420,15 @@ enum TimelineMapper {
             guard let id = node.id, let createdAt = node.createdAt else { return }
             items.append(TimelineItem(
                 id: id, actor: node.author?.actor ?? .ghost, createdAt: createdAt, payload: .comment(body: node.richBody),
-                url: url
+                url: url, reactions: GQLReactionGroup.counts(node.reactionGroups)
             ))
         case "PullRequestReview":
             guard let id = node.id, let createdAt = node.createdAt else { return }
             let comments = node.comments?.items.map(\.reviewComment) ?? []
             items.append(TimelineItem(
                 id: id, actor: node.author?.actor ?? .ghost, createdAt: createdAt,
-                payload: .review(state: reviewState(node.state), body: node.richBody, comments: comments), url: url
+                payload: .review(state: reviewState(node.state), body: node.richBody, comments: comments), url: url,
+                reactions: GQLReactionGroup.counts(node.reactionGroups)
             ))
         case "PullRequestCommit":
             guard let id = node.id, let commit = node.commit else { return }

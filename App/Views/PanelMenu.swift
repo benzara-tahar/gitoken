@@ -32,6 +32,9 @@ struct PanelMenu: Identifiable {
     /// Anchor frame in the `PanelMenu.space` coordinate space.
     var anchor: CGRect
     var items: [Item]
+    /// Opens above the anchor (controls at the bottom of the surface, like the composer), so the surface never
+    /// has to grow past the screen edge to fit it.
+    var opensUpward = false
 
     nonisolated static let space = "gitoken.surface"
 }
@@ -75,7 +78,7 @@ struct PanelMenuLayer: View {
     private func origin(for menu: PanelMenu) -> CGSize {
         let w = menuSize.width, h = menuSize.height
         let x = min(max(menu.anchor.maxX - w, 8), max(8, surfaceSize.width - w - 8))
-        var y = menu.anchor.maxY + 6
+        var y = menu.opensUpward ? menu.anchor.minY - h - 6 : menu.anchor.maxY + 6
         if y + h > surfaceSize.height - 8 { y = menu.anchor.minY - h - 6 }
         y = min(max(y, 8), max(8, surfaceSize.height - h - 8))
         return CGSize(width: x, height: y)
@@ -84,7 +87,7 @@ struct PanelMenuLayer: View {
 
 /// Minimum surface height required to show `menu` below its anchor without leaving the panel.
 func requiredHeight(for menu: PanelMenu?) -> CGFloat {
-    guard let menu else { return 0 }
+    guard let menu, !menu.opensUpward else { return 0 }
     var h: CGFloat = 10
     for item in menu.items {
         switch item {

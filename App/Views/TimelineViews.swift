@@ -70,6 +70,7 @@ struct TimelineItemView: View {
                 Text("opened this \(context.kindNoun)")
             } content: {
                 if !body.isEmpty { RichBodyView(source: body) }
+                reactions
             }
         case .comment(let body):
             let mentionsMe = body.mentions(context.viewer) && item.actor.login != context.viewer
@@ -81,6 +82,7 @@ struct TimelineItemView: View {
                     .background {
                         if mentionsMe { HighlightBox(tone: theme.accent) }
                     }
+                reactions
             }
         case .review(let state, let body, let comments):
             if body.isEmpty && state == .commented && !comments.isEmpty {
@@ -103,6 +105,7 @@ struct TimelineItemView: View {
                                 .foregroundStyle(look.tone == .accent ? AnyShapeStyle(.primary) : AnyShapeStyle(look.tone.color(theme)))
                                 .padding(10)
                                 .background { HighlightBox(tone: look.tone.color(theme)) }
+                            reactions
                         }
                         ForEach(comments) { comment in
                             ReviewCommentBlock(comment: comment, context: context, showsAuthor: comment.author.login != item.actor.login)
@@ -131,6 +134,15 @@ struct TimelineItemView: View {
             ChecksRow(summary: summary, date: item.createdAt, context: context)
         case .event(let kind, let detail):
             EventRow(kind: kind, detail: detail, item: item, context: context)
+        }
+    }
+
+    /// Reactions on the item itself; review comments carry their own bar.
+    @ViewBuilder
+    private var reactions: some View {
+        if let subjectID = item.reactionSubjectID {
+            ReactionBar(subjectID: subjectID, reactions: item.reactions, groupID: context.group.id)
+                .padding(.top, 4)
         }
     }
 }
@@ -473,19 +485,22 @@ private struct ReviewCommentBody: View {
                 DiffHunkView(comment: comment)
             }
             RichBodyView(source: comment.body)
-            Button {
-                model.replyTargets[context.group.id] = context.root(of: comment)
-                model.requestComposerFocus()
-            } label: {
-                Label("Reply", systemImage: "arrowshape.turn.up.left")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 6)
-                    .frame(height: 22)
-                    .contentShape(Rectangle())
+            HStack(spacing: 2) {
+                Button {
+                    model.replyTargets[context.group.id] = context.root(of: comment)
+                    model.requestComposerFocus()
+                } label: {
+                    Label("Reply", systemImage: "arrowshape.turn.up.left")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 6)
+                        .frame(height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Reply in thread to \(comment.author.displayName)")
+                ReactionBar(subjectID: comment.id, reactions: comment.reactions, groupID: context.group.id)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Reply in thread to \(comment.author.displayName)")
         }
     }
 }

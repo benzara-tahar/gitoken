@@ -242,7 +242,7 @@ import Testing
 
     // MARK: Quiet
 
-    @Test func quietHoursCollectActivityAndSummarizeWhenTheyEnd() async throws {
+    @Test func quietHoursCollectActivityAndEndWithOneMorningSummary() async throws {
         let h = try Harness()
         h.store.updateSettings { $0.quietHours = QuietHours(enabled: true, start: .init(hour: 13, minute: 0), end: .init(hour: 15, minute: 0)) }
         #expect(h.store.quietReason == .quietHours(until: .init(hour: 15, minute: 0)))
@@ -271,8 +271,9 @@ import Testing
         h.advance(minutes: 10)
         #expect(h.store.quietReason == nil)
         let summary = try #require(h.store.arrival)
-        #expect(summary.kind == .summary(
-            updates: 3, groups: 2, actors: [sarah, omar, lea], endedReason: .quietHours(until: .init(hour: 15, minute: 0))))
+        #expect(summary.kind == .morningSummary(MorningSummary(
+            updates: 3, conversations: 2, topRepos: [.init(repo: repo, updates: 3)], shelfChanges: [],
+            actors: [sarah, omar, lea])), "the morning summary replaces the generic quiet-hours summary")
 
         h.store.dismissArrival()
         h.advance(minutes: 1)

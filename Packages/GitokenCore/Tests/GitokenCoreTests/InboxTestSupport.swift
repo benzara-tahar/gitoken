@@ -22,10 +22,10 @@ let repo = RepoRef(owner: "acme", name: "web")
 
 func makeThread(
     _ id: String, updatedAt: Date, unread: Bool = true, reason: NotificationReason = .reviewRequested,
-    kind: SubjectKind = .pullRequest, lastReadAt: Date? = nil
+    kind: SubjectKind = .pullRequest, lastReadAt: Date? = nil, repo r: RepoRef? = nil
 ) -> NotificationThread {
     NotificationThread(
-        id: ThreadID(id), repo: repo, kind: kind, number: Int(id) ?? 1, title: "PR \(id)", reason: reason, unread: unread,
+        id: ThreadID(id), repo: r ?? repo, kind: kind, number: Int(id) ?? 1, title: "PR \(id)", reason: reason, unread: unread,
         updatedAt: updatedAt, lastReadAt: lastReadAt, subjectAPIURL: nil, latestCommentAPIURL: nil, repoOwnerAvatarURL: nil)
 }
 
@@ -69,6 +69,8 @@ final class ScriptedGitHub: GitHubService {
         var detailCalls: [ThreadID] = []
         var pollLastModified: [String?] = []
         var postedBodies: [String] = []
+        var reactionCalls: [(subjectID: String, content: ReactionContent)] = []
+        var reactionError: GitHubError?
     }
 
     let state = Mutex(State())
@@ -80,9 +82,9 @@ final class ScriptedGitHub: GitHubService {
 
     /// A thread GitHub lists, with its current timeline.
     func add(_ id: String, at date: Date, unread: Bool = true, reason: NotificationReason = .reviewRequested,
-             kind: SubjectKind = .pullRequest, items: [TimelineItem] = []) {
+             kind: SubjectKind = .pullRequest, repo: RepoRef? = nil, items: [TimelineItem] = []) {
         update {
-            $0.listing[ThreadID(id)] = makeThread(id, updatedAt: date, unread: unread, reason: reason, kind: kind)
+            $0.listing[ThreadID(id)] = makeThread(id, updatedAt: date, unread: unread, reason: reason, kind: kind, repo: repo)
             $0.timelines[ThreadID(id)] = items
             $0.version += 1
         }
@@ -174,6 +176,15 @@ final class ScriptedGitHub: GitHubService {
                 id: "reply-\(s.postedBodies.count)", databaseID: 9000 + s.postedBodies.count, author: me, body: RichBody(markdown: body),
                 createdAt: now, path: "src/app.ts", diffHunk: "", line: 2, replyToID: nil, url: nil)
         }
+    }
+
+    func addReaction(_ content: ReactionContent, subjectID: String) async throws(GitHubError) {
+        let error: GitHubError? = update { s in
+            if let error = s.reactionError { return error }
+            s.reactionCalls.append((subjectID, content))
+            return nil
+        }
+        if let error { throw error }
     }
 }
 

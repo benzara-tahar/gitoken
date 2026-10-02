@@ -2,7 +2,7 @@ import GitokenCore
 import SwiftUI
 
 /// One PR/issue group. Quick actions appear on hover and are always reachable through the context menu,
-/// keyboard shortcuts (D / S / U / Return when selected), and VoiceOver actions.
+/// keyboard shortcuts (E / S / U / Return when selected), and VoiceOver actions.
 struct InboxRow: View {
     @Environment(NotchModel.self) private var model
     @Environment(\.theme) private var theme
@@ -188,7 +188,7 @@ struct InboxRow: View {
             case .snoozed:
                 IconButton(symbol: "bell", label: "Unsnooze", size: 24) { model.unsnooze(group.id) }
             case .done:
-                IconButton(symbol: "tray.and.arrow.up", label: "Move to Inbox (D)", size: 24) { model.undoDone(group.id) }
+                IconButton(symbol: "tray.and.arrow.up", label: "Move to Inbox (E)", size: 24) { model.undoDone(group.id) }
             case .new, .pending:
                 IconButton(symbol: "clock", label: "Snooze (S)", active: menuOpen, size: 24) {
                     model.presentSnoozeMenu(for: group.id)
@@ -196,7 +196,7 @@ struct InboxRow: View {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelMenu.space)) } action: {
                     model.anchorFrames[menuID] = $0
                 }
-                IconButton(symbol: "checkmark", label: "Mark done (D)", size: 24) { model.markDone(group.id) }
+                IconButton(symbol: "checkmark", label: "Mark done (E)", size: 24) { model.markDone(group.id) }
             }
         }
         .padding(2)
@@ -235,6 +235,10 @@ struct InboxRow: View {
         Divider()
         Button("Open on GitHub") { model.openOnGitHub(group.id) }
         Button("Copy Link") { model.copyLink(group.id) }
+        Divider()
+        ForEach(MuteRule.suggestions(for: group.thread), id: \.self) { rule in
+            Button("Mute \(rule.subject)") { model.mute(rule) }
+        }
     }
 
     private var accessibilityText: String {

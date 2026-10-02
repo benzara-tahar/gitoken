@@ -6,8 +6,8 @@ public final class GitHubClient: GitHubService {
     static let graphQLURL = URL(string: "https://api.github.com/graphql")!
     static let minimumPollInterval: TimeInterval = 60
 
-    private let tokens: any TokenProvider
-    private let session: URLSession
+    let tokens: any TokenProvider
+    let session: URLSession
     private let now: any NowProvider
 
     public init(tokens: any TokenProvider, session: URLSession = .shared, now: any NowProvider = SystemNow()) {
@@ -99,12 +99,17 @@ public final class GitHubClient: GitHubService {
         return reply.reviewComment(replyToID: parent.nodeId)
     }
 
+    public func addReaction(_ content: ReactionContent, subjectID: String) async throws(GitHubError) {
+        let variables = AddReactionVariables(subjectId: subjectID, content: content.rawValue)
+        let _: GQLAddReactionData = try await graphQL(GraphQLQueries.addReaction, variables: variables)
+    }
+
     /// Makes comment responses carry `body_html` / `body_text` alongside the markdown `body`.
     private static let fullMediaType = ["Accept": "application/vnd.github.full+json"]
 
     // MARK: - Transport
 
-    private func graphQL<Payload: Decodable>(_ query: String, variables: SubjectVariables) async throws(GitHubError)
+    func graphQL<Payload: Decodable, Variables: Encodable>(_ query: String, variables: Variables) async throws(GitHubError)
         -> Payload
     {
         let body: Data
@@ -122,7 +127,7 @@ public final class GitHubClient: GitHubService {
 
     /// Sends an authenticated request. A 401 drops the cached token and retries once with a fresh one.
     /// 2xx and 304 are returned; every other status becomes a `GitHubError`.
-    private func send(
+    func send(
         _ method: String, _ url: URL, body: Data? = nil, headers: [String: String] = [:], notificationsScope: Bool = false
     ) async throws(GitHubError) -> (Data, HTTPURLResponse) {
         var attempt = 0
