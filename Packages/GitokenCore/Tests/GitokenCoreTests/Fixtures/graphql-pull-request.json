@@ -1,0 +1,172 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_kwDOfixture142",
+        "title": "Debounce search input and memoize result rows",
+        "state": "OPEN",
+        "isDraft": false,
+        "merged": false,
+        "url": "https://github.com/platform/web/pull/142",
+        "body": "Typing in global search fires a request per keystroke. This debounces the input (250ms) and memoizes `ResultRow`.\n\nCloses #131.",
+        "createdAt": "2026-09-29T12:20:00Z",
+        "author": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+        "timelineItems": {
+          "pageInfo": { "hasPreviousPage": false },
+          "nodes": [
+            {
+              "__typename": "IssueComment",
+              "id": "IC_kwDOfixture1",
+              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+              "body": "Did you check the `?q=` deep-link flow?",
+              "createdAt": "2026-09-29T13:00:00Z",
+              "url": "https://github.com/platform/web/pull/142#issuecomment-5001"
+            },
+            {
+              "__typename": "PullRequestCommit",
+              "id": "PURC_fixture1",
+              "url": "https://github.com/platform/web/pull/142/commits/a3f9c21",
+              "commit": {
+                "oid": "a3f9c21000000000000000000000000000000001",
+                "messageHeadline": "Handle initial query from URL",
+                "committedDate": "2026-09-30T09:20:00Z",
+                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" } }
+              }
+            },
+            {
+              "__typename": "PullRequestCommit",
+              "id": "PURC_fixture2",
+              "url": "https://github.com/platform/web/pull/142/commits/7be0d44",
+              "commit": {
+                "oid": "7be0d44000000000000000000000000000000002",
+                "messageHeadline": "Memoize row renderer",
+                "committedDate": "2026-09-30T09:21:00Z",
+                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" } }
+              }
+            },
+            {
+              "__typename": "PullRequestCommit",
+              "id": "PURC_fixture3",
+              "url": "https://github.com/platform/web/pull/142/commits/9d03f6e",
+              "commit": {
+                "oid": "9d03f6e000000000000000000000000000000003",
+                "messageHeadline": "Fix lint in ResultList",
+                "committedDate": "2026-09-30T09:40:00Z",
+                "author": { "name": "Leo Martins", "user": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" } }
+              }
+            },
+            {
+              "__typename": "ReviewRequestedEvent",
+              "id": "RRE_fixture1",
+              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+              "createdAt": "2026-09-30T09:45:00Z",
+              "requestedReviewer": { "__typename": "User", "login": "schen" }
+            },
+            {
+              "__typename": "IssueComment",
+              "id": "IC_kwDOfixture2",
+              "author": { "__typename": "Bot", "login": "preview-bot", "avatarUrl": "https://avatars.githubusercontent.com/in/9999?v=4" },
+              "body": "Preview deployed to https://pr-142.preview.example.dev",
+              "createdAt": "2026-09-30T09:50:00Z",
+              "url": "https://github.com/platform/web/pull/142#issuecomment-5002"
+            },
+            {
+              "__typename": "PullRequestReview",
+              "id": "PRR_fixture1",
+              "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+              "body": "A couple of things before this lands.",
+              "state": "CHANGES_REQUESTED",
+              "createdAt": "2026-09-30T13:32:00Z",
+              "url": "https://github.com/platform/web/pull/142#pullrequestreview-7001",
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_fixture1",
+                    "databaseId": 9001,
+                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+                    "body": "This effect re-subscribes on every keystroke because `onSearch` is recreated by the parent.",
+                    "createdAt": "2026-09-30T13:30:00Z",
+                    "path": "src/components/SearchBox.tsx",
+                    "diffHunk": "@@ -28,13 +28,18 @@ export function SearchBox({ onSearch, initialQuery }: Props) {\n   const [value, setValue] = useState(initialQuery ?? \"\");\n-  useEffect(() => {\n+  const debounced = useDebouncedValue(value, 250);\n+  useEffect(() => {\n+  }, [debounced, onSearch]);",
+                    "line": 37,
+                    "originalLine": 37,
+                    "replyTo": null,
+                    "url": "https://github.com/platform/web/pull/142#discussion_r9001"
+                  },
+                  {
+                    "id": "PRRC_fixture2",
+                    "databaseId": 9002,
+                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+                    "body": "`key={index}` will defeat the row memoization as soon as results reorder.",
+                    "createdAt": "2026-09-30T13:31:00Z",
+                    "path": "src/components/ResultList.tsx",
+                    "diffHunk": "@@ -14,9 +14,14 @@ type Props = { results: SearchResult[]; query: string };\n+      {results.map((result, index) => (\n+        <li key={index}>{renderRow(result)}</li>",
+                    "line": null,
+                    "originalLine": 23,
+                    "replyTo": null,
+                    "url": "https://github.com/platform/web/pull/142#discussion_r9002"
+                  }
+                ]
+              }
+            },
+            {
+              "__typename": "PullRequestReview",
+              "id": "PRR_fixture2",
+              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+              "body": "",
+              "state": "COMMENTED",
+              "createdAt": "2026-09-30T13:49:00Z",
+              "url": "https://github.com/platform/web/pull/142#pullrequestreview-7002",
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_fixture3",
+                    "databaseId": 9003,
+                    "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+                    "body": "+1 to the ref. It also avoids a stale closure in the cleanup.",
+                    "createdAt": "2026-09-30T13:49:00Z",
+                    "path": "src/components/SearchBox.tsx",
+                    "diffHunk": "@@ -28,13 +28,18 @@ export function SearchBox({ onSearch, initialQuery }: Props) {\n   const [value, setValue] = useState(initialQuery ?? \"\");\n-  useEffect(() => {\n+  const debounced = useDebouncedValue(value, 250);\n+  useEffect(() => {\n+  }, [debounced, onSearch]);",
+                    "line": 37,
+                    "originalLine": 37,
+                    "replyTo": { "id": "PRRC_fixture1" },
+                    "url": "https://github.com/platform/web/pull/142#discussion_r9003"
+                  }
+                ]
+              }
+            },
+            {
+              "__typename": "HeadRefForcePushedEvent",
+              "id": "HRFPE_fixture1",
+              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+              "createdAt": "2026-09-30T13:55:00Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "7be0d44000000000000000000000000000000002",
+                "committedDate": "2026-09-30T13:54:00Z",
+                "statusCheckRollup": {
+                  "state": "FAILURE",
+                  "contexts": {
+                    "nodes": [
+                      { "__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE", "status": "COMPLETED", "completedAt": "2026-09-30T14:02:00Z", "checkSuite": { "app": { "slug": "github-actions", "name": "GitHub Actions" } } },
+                      { "__typename": "CheckRun", "name": "unit-tests", "conclusion": "FAILURE", "status": "COMPLETED", "completedAt": "2026-09-30T14:05:00Z", "checkSuite": { "app": { "slug": "github-actions", "name": "GitHub Actions" } } },
+                      { "__typename": "CheckRun", "name": "build", "conclusion": "SUCCESS", "status": "COMPLETED", "completedAt": "2026-09-30T14:01:00Z", "checkSuite": { "app": { "slug": "github-actions", "name": "GitHub Actions" } } },
+                      { "__typename": "CheckRun", "name": "e2e", "conclusion": null, "status": "IN_PROGRESS", "completedAt": null, "checkSuite": { "app": { "slug": "github-actions", "name": "GitHub Actions" } } },
+                      { "__typename": "StatusContext", "context": "deploy/preview", "contextState": "SUCCESS", "createdAt": "2026-09-30T14:00:00Z" },
+                      { "__typename": "StatusContext", "context": "ci/legacy", "contextState": "ERROR", "createdAt": "2026-09-30T13:58:00Z" }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

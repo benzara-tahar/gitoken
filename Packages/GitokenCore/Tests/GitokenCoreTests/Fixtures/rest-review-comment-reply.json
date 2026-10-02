@@ -1,0 +1,30 @@
+{
+  "url": "https://api.github.com/repos/platform/web/pulls/comments/9010",
+  "pull_request_review_id": 7010,
+  "id": 9010,
+  "node_id": "PRRC_fixture10",
+  "diff_hunk": "@@ -28,13 +28,18 @@ export function SearchBox({ onSearch, initialQuery }: Props) {\n   const [value, setValue] = useState(initialQuery ?? \"\");\n-  useEffect(() => {\n+  const debounced = useDebouncedValue(value, 250);\n+  useEffect(() => {\n+  }, [debounced, onSearch]);",
+  "path": "src/components/SearchBox.tsx",
+  "commit_id": "7be0d44000000000000000000000000000000002",
+  "original_commit_id": "7be0d44000000000000000000000000000000002",
+  "user": {
+    "login": "akim",
+    "id": 9101,
+    "node_id": "U_fixture9101",
+    "avatar_url": "https://avatars.githubusercontent.com/u/9101?v=4",
+    "type": "User"
+  },
+  "body": "Moved the callback into a ref — thanks both.",
+  "created_at": "2026-09-30T14:20:00Z",
+  "updated_at": "2026-09-30T14:20:00Z",
+  "html_url": "https://github.com/platform/web/pull/142#discussion_r9010",
+  "pull_request_url": "https://api.github.com/repos/platform/web/pulls/142",
+  "author_association": "MEMBER",
+  "start_line": null,
+  "original_start_line": null,
+  "line": 37,
+  "original_line": 37,
+  "side": "RIGHT",
+  "in_reply_to_id": 9001,
+  "subject_type": "line"
+}

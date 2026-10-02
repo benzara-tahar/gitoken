@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # See ci.yml for the macos-15 fallback.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        id: xcode
+        run: scripts/select-xcode.sh 26
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            Packages/GitokenCore/.build
+            build/DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-xcode${{ steps.xcode.outputs.version }}-${{ hashFiles('**/Package.resolved', 'Packages/GitokenCore/Package.swift') }}
+          restore-keys: |
+            spm-${{ runner.os }}-xcode${{ steps.xcode.outputs.version }}-
+
+      - name: Test GitokenCore
+        working-directory: Packages/GitokenCore
+        run: swift test
+
+      - name: Package
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/package.sh "${TAG#v}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.package.outputs.version }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          prerelease=false
+          [[ "$VERSION" == *-* ]] && prerelease=true
+          gh release create "$TAG" "$ZIP" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease="$prerelease" \
+            --title "Gitoken $VERSION" \
+            --generate-notes \
+            --notes "SHA-256 of Gitoken-$VERSION.zip: \`$SHA256\`"
+
+      - name: Check tap token
+        id: tap
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if [[ -z "$TAP_GITHUB_TOKEN" ]]; then
+            echo "::notice title=Homebrew tap not updated::TAP_GITHUB_TOKEN secret is not set; skipping the benzara-tahar/homebrew-tap bump."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$VERSION" == *-* ]]; then
+            echo "::notice title=Homebrew tap not updated::$VERSION is a prerelease; the cask only tracks stable releases."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout tap
+        if: steps.tap.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: benzara-tahar/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Bump cask
+        if: steps.tap.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          mkdir -p homebrew-tap/Casks
+          scripts/render-cask.sh "$VERSION" "$SHA256" "$GITHUB_REPOSITORY" > homebrew-tap/Casks/gitoken.rb
+          cd homebrew-tap
+          git add Casks/gitoken.rb
+          if git diff --cached --quiet; then
+            echo "::notice::Casks/gitoken.rb already at $VERSION"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "gitoken $VERSION"
+          git push origin HEAD

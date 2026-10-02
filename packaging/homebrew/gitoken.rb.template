@@ -1,0 +1,35 @@
+cask "gitoken" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "https://github.com/@REPOSITORY@/releases/download/v#{version}/Gitoken-#{version}.zip"
+  name "Gitoken"
+  desc "GitHub notifications companion that lives around the notch"
+  homepage "https://github.com/@REPOSITORY@"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  depends_on macos: :sequoia
+
+  app "Gitoken.app"
+
+  uninstall quit: "io.github.benzara-tahar.Gitoken"
+
+  zap trash: [
+    "~/Library/Application Support/Gitoken",
+    "~/Library/Preferences/io.github.benzara-tahar.Gitoken.plist",
+  ]
+
+  caveats <<~EOS
+    Gitoken is ad-hoc signed and not notarized. On first launch macOS blocks it:
+    open System Settings > Privacy & Security and click "Open Anyway" next to
+    the Gitoken message, or clear the quarantine flag:
+      xattr -dr com.apple.quarantine /Applications/Gitoken.app
+
+    Gitoken reuses the GitHub CLI login. It needs gh installed and signed in:
+      brew install gh && gh auth login
+  EOS
+end

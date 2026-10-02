@@ -1,0 +1,57 @@
+{
+  "data": {
+    "repository": {
+      "issue": {
+        "id": "I_kwDOfixture311",
+        "title": "Tooltip flickers when its trigger is inside a scroll container",
+        "state": "CLOSED",
+        "url": "https://github.com/platform/ui-kit/issues/311",
+        "body": "Repro: put a `<Tooltip>` trigger inside an element with `overflow: auto` and scroll while hovering.",
+        "createdAt": "2026-09-29T15:20:00.000Z",
+        "author": { "__typename": "User", "login": "ilaurent", "avatarUrl": "https://avatars.githubusercontent.com/u/9104?v=4", "name": "Inès Laurent" },
+        "timelineItems": {
+          "pageInfo": { "hasPreviousPage": true },
+          "nodes": [
+            {
+              "__typename": "IssueComment",
+              "id": "IC_kwDOfixture10",
+              "author": { "__typename": "User", "login": "pnair", "avatarUrl": "https://avatars.githubusercontent.com/u/9105?v=4", "name": "Priya Nair" },
+              "body": "I can reproduce. `useFloating` recomputes the reference rect on scroll.",
+              "createdAt": "2026-09-29T18:10:00Z",
+              "url": "https://github.com/platform/ui-kit/issues/311#issuecomment-6001"
+            },
+            {
+              "__typename": "AssignedEvent",
+              "id": "AE_fixture1",
+              "actor": { "__typename": "User", "login": "ilaurent", "avatarUrl": "https://avatars.githubusercontent.com/u/9104?v=4", "name": "Inès Laurent" },
+              "createdAt": "2026-09-30T13:58:00Z",
+              "assignee": { "__typename": "User", "login": "akim" }
+            },
+            {
+              "__typename": "IssueComment",
+              "id": "IC_kwDOfixture11",
+              "author": null,
+              "body": "Same here on Firefox.",
+              "createdAt": "2026-09-30T14:00:00Z",
+              "url": "https://github.com/platform/ui-kit/issues/311#issuecomment-6002"
+            },
+            {
+              "__typename": "IssueComment",
+              "id": "IC_kwDOfixture12",
+              "author": { "__typename": "User", "login": "ilaurent", "avatarUrl": "https://avatars.githubusercontent.com/u/9104?v=4", "name": "Inès Laurent" },
+              "body": "@akim you touched the hover-intent logic in #276 — is the 120ms grace period supposed to cover this?",
+              "createdAt": "2026-09-30T14:06:00Z",
+              "url": "https://github.com/platform/ui-kit/issues/311#issuecomment-6003"
+            },
+            {
+              "__typename": "ClosedEvent",
+              "id": "CE_fixture1",
+              "actor": { "__typename": "User", "login": "ilaurent", "avatarUrl": "https://avatars.githubusercontent.com/u/9104?v=4", "name": "Inès Laurent" },
+              "createdAt": "2026-09-30T15:00:00Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

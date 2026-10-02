@@ -1,0 +1,60 @@
+[
+  {
+    "id": "400012",
+    "unread": true,
+    "reason": "team_mention",
+    "updated_at": "2026-09-28T17:45:10Z",
+    "last_read_at": null,
+    "subject": {
+      "title": "RFC: retire the legacy design tokens",
+      "url": "https://api.github.com/repos/platform/rfcs/discussions/12",
+      "latest_comment_url": null,
+      "type": "Discussion"
+    },
+    "repository": {
+      "id": 5004,
+      "node_id": "R_kgDOfixture4",
+      "name": "rfcs",
+      "full_name": "platform/rfcs",
+      "private": false,
+      "owner": {
+        "login": "platform",
+        "id": 7001,
+        "avatar_url": "https://avatars.githubusercontent.com/u/7001?v=4",
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/platform/rfcs"
+    },
+    "url": "https://api.github.com/notifications/threads/400012",
+    "subscription_url": "https://api.github.com/notifications/threads/400012/subscription"
+  },
+  {
+    "id": "200087",
+    "unread": false,
+    "reason": "ci_activity",
+    "updated_at": "2026-09-28T11:02:44Z",
+    "last_read_at": "2026-09-28T11:05:00Z",
+    "subject": {
+      "title": "build-and-test workflow run failed for idempotency branch",
+      "url": null,
+      "latest_comment_url": null,
+      "type": "CheckSuite"
+    },
+    "repository": {
+      "id": 5002,
+      "node_id": "R_kgDOfixture2",
+      "name": "api",
+      "full_name": "platform/api",
+      "private": true,
+      "owner": {
+        "login": "platform",
+        "id": 7001,
+        "avatar_url": "https://avatars.githubusercontent.com/u/7001?v=4",
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/platform/api"
+    },
+    "url": "https://api.github.com/notifications/threads/200087",
+    "subscription_url": "https://api.github.com/notifications/threads/200087/subscription"
+  }
+]
