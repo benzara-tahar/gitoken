@@ -65,20 +65,25 @@ struct TimelineItemView: View {
 
     var body: some View {
         switch item.payload {
+        case .opened(let body):
+            FullEventRow(actor: item.actor, date: item.createdAt, context: context) {
+                Text("opened this \(context.kindNoun)")
+            } content: {
+                if !body.isEmpty { RichBodyView(source: body) }
+            }
         case .comment(let body):
-            let mentionsMe = MarkdownLite.mentions(body, login: context.viewer) && item.actor.login != context.viewer
+            let mentionsMe = body.mentions(context.viewer) && item.actor.login != context.viewer
             FullEventRow(actor: item.actor, date: item.createdAt, context: context) {
                 if mentionsMe { EventTag(text: "mentioned you") }
             } content: {
-                MarkdownText(text: body)
+                RichBodyView(source: body)
                     .padding(mentionsMe ? 10 : 0)
                     .background {
                         if mentionsMe { HighlightBox(tone: theme.accent) }
                     }
             }
         case .review(let state, let body, let comments):
-            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty && state == .commented && !comments.isEmpty {
+            if body.isEmpty && state == .commented && !comments.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(comments) { comment in
                         ReviewCommentRow(comment: comment, context: context)
@@ -93,8 +98,8 @@ struct TimelineItemView: View {
                     Text(look.verb).foregroundStyle(look.tone.color(theme)).fontWeight(.semibold)
                 } content: {
                     VStack(alignment: .leading, spacing: 8) {
-                        if !trimmed.isEmpty {
-                            MarkdownText(text: trimmed)
+                        if !body.isEmpty {
+                            RichBodyView(source: body)
                                 .foregroundStyle(look.tone == .accent ? AnyShapeStyle(.primary) : AnyShapeStyle(look.tone.color(theme)))
                                 .padding(10)
                                 .background { HighlightBox(tone: look.tone.color(theme)) }
@@ -127,6 +132,126 @@ struct TimelineItemView: View {
         case .event(let kind, let detail):
             EventRow(kind: kind, detail: detail, item: item, context: context)
         }
+    }
+}
+
+/// One timeline row: an item, a collapsed run of review requests, or a collapsed AI review.
+struct TimelineEntryView: View {
+    let entry: TimelineEntry
+    let context: TimelineContext
+
+    var body: some View {
+        switch entry {
+        case .item(let item): TimelineItemView(item: item, context: context)
+        case .reviewRequests(let group): ReviewRequestsRow(group: group, context: context)
+        case .aiReview(let item): AIReviewRow(item: item, context: context)
+        }
+    }
+}
+
+/// "Leo requested review from 3 teams"; the names show on hover and when expanded.
+private struct ReviewRequestsRow: View {
+    let group: ReviewRequestGroup
+    let context: TimelineContext
+    @State private var expanded = false
+
+    var body: some View {
+        let name = Format.firstName(group.actor, viewer: context.viewer)
+        Button { expanded.toggle() } label: {
+            CompactEventRow(symbol: "eye", tone: .warn, date: group.createdAt, context: context) {
+                Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) \(summary) \(Image(systemName: expanded ? "chevron.up" : "chevron.down"))")
+            } extra: {
+                if expanded {
+                    FlowLayout(spacing: 4) {
+                        ForEach(group.reviewers, id: \.self) { reviewer in
+                            Label(reviewer, systemImage: reviewer.contains("/") ? "person.3" : "person")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .frame(height: 19)
+                                .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
+                        }
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(group.reviewers.joined(separator: ", "))
+        .accessibilityValue(expanded ? "expanded" : "collapsed")
+    }
+
+    private var summary: String {
+        let others = group.reviewers.filter { $0.caseInsensitiveCompare(context.viewer ?? "") != .orderedSame }
+        if group.includes(context.viewer) {
+            return others.isEmpty ? "requested your review" : "requested your review along with \(Self.describe(others))"
+        }
+        return "requested review from \(Self.describe(others))"
+    }
+
+    static func describe(_ reviewers: [String]) -> String {
+        let teams = reviewers.filter { $0.contains("/") }
+        let people = reviewers.filter { !$0.contains("/") }
+        if reviewers.count == 1 { return reviewers[0] }
+        if people.isEmpty { return "\(teams.count) teams" }
+        if teams.isEmpty { return people.count == 2 ? "\(people[0]) and \(people[1])" : "\(people.count) people" }
+        if people.count == 1 { return "\(people[0]) and \(Format.plural(teams.count, "team"))" }
+        return "\(reviewers.count) reviewers"
+    }
+}
+
+/// An AI reviewer's review/comment as one line ("Copilot reviewed · 4 comments"); expands to the full item inline.
+private struct AIReviewRow: View {
+    let item: TimelineItem
+    let context: TimelineContext
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                CompactEventRow(symbol: "sparkles", tone: .neutral, date: item.createdAt, context: context) {
+                    Text("\(Text(item.actor.displayName).fontWeight(.semibold).foregroundStyle(.primary)) \(summary) \(Image(systemName: expanded ? "chevron.up" : "chevron.down"))")
+                } extra: {
+                    if !expanded, let preview {
+                        Text(preview)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "expanded" : "collapsed")
+            if expanded {
+                TimelineItemView(item: item, context: context)
+            }
+        }
+    }
+
+    private var summary: String {
+        switch item.payload {
+        case .review(let state, _, let comments):
+            let verb = switch state {
+            case .approved: "approved"
+            case .changesRequested: "requested changes"
+            default: "reviewed"
+            }
+            return comments.isEmpty ? verb : "\(verb) · \(Format.plural(comments.count, "comment"))"
+        default:
+            return "commented"
+        }
+    }
+
+    private var preview: String? {
+        let text: String
+        switch item.payload {
+        case .review(_, let body, let comments): text = body.isEmpty ? comments.first?.body.plainText ?? "" : body.plainText
+        case .comment(let body): text = body.plainText
+        default: return nil
+        }
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        return line.isEmpty ? nil : line
     }
 }
 
@@ -337,7 +462,7 @@ private struct ReviewCommentBody: View {
             if let parent {
                 HStack(spacing: 6) {
                     AvatarView(actor: parent.author, size: 16)
-                    Text(Format.plain(parent.body, limit: 90)).lineLimit(1)
+                    Text(parent.body.plainText.split(whereSeparator: \.isWhitespace).joined(separator: " ")).lineLimit(1)
                 }
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
@@ -347,7 +472,7 @@ private struct ReviewCommentBody: View {
             } else {
                 DiffHunkView(comment: comment)
             }
-            MarkdownText(text: comment.body)
+            RichBodyView(source: comment.body)
             Button {
                 model.replyTargets[context.group.id] = context.root(of: comment)
                 model.requestComposerFocus()
@@ -449,27 +574,15 @@ private struct EventRow: View {
 
     var body: some View {
         let name = Format.firstName(item.actor, viewer: context.viewer)
-        switch kind {
-        case .opened:
-            FullEventRow(actor: item.actor, date: item.createdAt, context: context) {
-                Text("opened this \(context.kindNoun)")
-            } content: {
-                if let detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    MarkdownText(text: detail)
-                }
-            }
-        default:
-            let look = look(name: name)
-            CompactEventRow(symbol: look.symbol, tone: look.tone, date: item.createdAt, context: context) {
-                Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) \(look.text)")
-            }
+        let look = look(name: name)
+        CompactEventRow(symbol: look.symbol, tone: look.tone, date: item.createdAt, context: context) {
+            Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) \(look.text)")
         }
     }
 
     private func look(name: String) -> (symbol: String, tone: Tone, text: String) {
         let target = detail.flatMap { $0.isEmpty ? nil : $0 }
         switch kind {
-        case .opened: return ("plus", .success, "opened this \(context.kindNoun)")
         case .closed:
             return (context.group.thread.kind == .issue ? "checkmark.circle" : "xmark", .merged, "closed this")
         case .reopened: return ("arrow.clockwise", .success, "reopened this")

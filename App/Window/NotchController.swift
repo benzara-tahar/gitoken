@@ -16,6 +16,7 @@ final class NotchController {
     private var fullscreenRecheck: Task<Void, Never>?
     private var monitors: [Any] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    private var soundPolicy = SoundPolicy()
 
     init(store: InboxStore) {
         model = NotchModel(store: store)
@@ -38,6 +39,7 @@ final class NotchController {
         installMonitors()
         installObservers()
         observeRoute()
+        observeArrival()
         panel.orderFrontRegardless()
         updateFullscreen()
     }
@@ -140,6 +142,32 @@ final class NotchController {
             panel.resignKey()
             panel.orderOut(nil)
             if !model.hiddenForFullscreen { panel.orderFrontRegardless() }
+        }
+    }
+
+    // MARK: Arrival sound
+
+    private func observeArrival() {
+        withObservationTracking {
+            _ = model.store.arrival
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.arrivalChanged()
+                self?.observeArrival()
+            }
+        }
+    }
+
+    private func arrivalChanged() {
+        let store = model.store
+        guard let arrival = store.arrival else { return }
+        let context = SoundPolicy.Context(
+            settings: store.settings, quietReason: store.quietReason, hiddenForFullscreen: model.hiddenForFullscreen,
+            panelOpen: model.route.isOpen)
+        if let cue = soundPolicy.cue(for: arrival, context: context, now: store.now.now()) {
+            model.sounds.play(cue.sound, volume: cue.volume, reason: "arrival \(arrival.id) ×\(arrival.updateCount)")
+        } else {
+            SoundPlayer.log.info("Silent: arrival \(arrival.id, privacy: .public) ×\(arrival.updateCount)")
         }
     }
 

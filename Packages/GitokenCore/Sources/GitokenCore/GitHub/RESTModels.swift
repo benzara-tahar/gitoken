@@ -122,12 +122,15 @@ struct RESTIssueComment: Decodable {
     let nodeId: String
     let user: RESTUser?
     let body: String?
+    let bodyHtml: String?
+    let bodyText: String?
     let createdAt: Date
     let htmlUrl: String?
 
     var timelineItem: TimelineItem {
         TimelineItem(
-            id: nodeId, actor: user?.actor ?? .ghost, createdAt: createdAt, payload: .comment(body: body ?? ""),
+            id: nodeId, actor: user?.actor ?? .ghost, createdAt: createdAt,
+            payload: .comment(body: RichBody(markdown: body ?? "", html: bodyHtml, plain: bodyText)),
             url: htmlUrl.flatMap(URL.init(string:))
         )
     }
@@ -138,6 +141,8 @@ struct RESTReviewComment: Decodable {
     let nodeId: String
     let user: RESTUser?
     let body: String?
+    let bodyHtml: String?
+    let bodyText: String?
     let createdAt: Date
     let path: String
     let diffHunk: String
@@ -148,7 +153,8 @@ struct RESTReviewComment: Decodable {
 
     func reviewComment(replyToID: String?) -> ReviewComment {
         ReviewComment(
-            id: nodeId, databaseID: id, author: user?.actor ?? .ghost, body: body ?? "", createdAt: createdAt,
+            id: nodeId, databaseID: id, author: user?.actor ?? .ghost,
+            body: RichBody(markdown: body ?? "", html: bodyHtml, plain: bodyText), createdAt: createdAt,
             path: path, diffHunk: diffHunk, line: line ?? originalLine, replyToID: replyToID,
             url: htmlUrl.flatMap(URL.init(string:))
         )

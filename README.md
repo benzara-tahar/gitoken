@@ -3,9 +3,11 @@
 Gitoken is a macOS menu-bar agent that shows your GitHub notifications around the MacBook notch.
 
 - The collapsed notch shows the number of unseen groups and, while activity arrives, the avatar of whoever caused it. Bursts on the same pull request merge into a single arrival.
-- Clicking the notch opens a compact inbox grouped by pull request or issue. Opening a group shows the conversation (timeline, review comments with their diff hunks, check status) in a narrow panel below the notch.
+- Clicking the notch opens a compact inbox grouped by pull request or issue. Opening a group shows the conversation (timeline, review comments with their diff hunks, check status) in a narrow panel below the notch. Comment bodies render from GitHub's HTML: headings, lists and task lists, tables, highlighted code, collapsible details and images (dark variants on dark surfaces); long bodies fold behind "Show more". New activity arriving while a conversation or the inbox is open is scrolled to, or offered with a "new ↓" pill if you're reading elsewhere.
+- Reviews by AI reviewers (Copilot, CodeRabbit, …) can be shown, collapsed to one line, or hidden. Unless "Notify for AI reviews" is on, AI-only activity never triggers an arrival or sound and doesn't change inbox previews.
 - Seen is not done. Opening a group marks it seen (read on GitHub); marking it done removes it from the inbox (done on GitHub). Seen-but-not-done groups stay listed as pending. New activity on a done group brings it back.
 - Quiet hours, manual quiet and snooze (per group or app-wide: 30 minutes, 1 hour, until tomorrow 09:00) suppress arrival animations while activity keeps collecting; a summary arrival appears when quiet ends.
+- A subtle sound (Drop, Chime or Tap; or Off) plays once per new arrival. Bursts stay a single sound, and quiet mode, quiet hours, snooze and full-screen spaces keep it silent.
 
 On Macs without a notch, Gitoken shows a pill at the top of the main screen. It hides while a full-screen space is active.
 
@@ -64,6 +66,15 @@ To produce a distributable zip (universal Release build, ad-hoc signed, zipped w
 
 ```sh
 scripts/package.sh 1.2.3   # -> dist/Gitoken-1.2.3.zip and its sha256
+```
+
+### Sounds
+
+The arrival sounds in `App/Resources/Sounds/` are synthesized by `scripts/generate-sounds.swift` (no third-party audio). The script is deterministic, so rerunning it reproduces the committed files byte for byte; it prints each file's duration, peak and RMS level:
+
+```sh
+swift scripts/generate-sounds.swift
+afinfo App/Resources/Sounds/Drop.caf
 ```
 
 ### Debug builds

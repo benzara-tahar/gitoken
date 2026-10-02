@@ -47,22 +47,68 @@ public struct QuietHours: Hashable, Codable, Sendable {
     }
 }
 
+/// Bundled arrival sound (rendered by `scripts/generate-sounds.swift`); the raw value names the resource.
+public enum ArrivalSound: String, Codable, Sendable, CaseIterable {
+    case off, drop, chime, tap
+
+    public var title: String { rawValue.capitalized }
+    /// Resource name of the bundled `.caf`, nil for `.off`.
+    public var resourceName: String? { self == .off ? nil : rawValue.capitalized }
+}
+
+/// How reviews by AI reviewers (Copilot, CodeRabbit, …) appear in conversation timelines.
+public enum AIReviewDisplay: String, Codable, Sendable, CaseIterable {
+    case show, collapse, hide
+
+    public var title: String { rawValue.capitalized }
+}
+
 public struct AppSettings: Hashable, Codable, Sendable {
     public var appearance: Appearance
     public var motion: MotionStyle
     public var display: DisplayMode
     public var quietHours: QuietHours
     public var launchAtLogin: Bool
+    public var sound: ArrivalSound
+    /// 0…1, relative to the system output volume.
+    public var soundVolume: Double
+    public var aiReviews: AIReviewDisplay
+    /// When false, AI-authored activity never announces an arrival (or sound).
+    public var notifyAIReviews: Bool
 
     public init(
         appearance: Appearance = .calm, motion: MotionStyle = .gentle, display: DisplayMode = .notch,
-        quietHours: QuietHours = .init(), launchAtLogin: Bool = false
+        quietHours: QuietHours = .init(), launchAtLogin: Bool = false, sound: ArrivalSound = .drop, soundVolume: Double = 0.35,
+        aiReviews: AIReviewDisplay = .collapse, notifyAIReviews: Bool = false
     ) {
         self.appearance = appearance
         self.motion = motion
         self.display = display
         self.quietHours = quietHours
         self.launchAtLogin = launchAtLogin
+        self.sound = sound
+        self.soundVolume = soundVolume
+        self.aiReviews = aiReviews
+        self.notifyAIReviews = notifyAIReviews
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case appearance, motion, display, quietHours, launchAtLogin, sound, soundVolume, aiReviews, notifyAIReviews
+    }
+
+    /// Settings are stored as JSON; keys added after a release fall back to defaults so older rows still load.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        appearance = try c.decodeIfPresent(Appearance.self, forKey: .appearance) ?? d.appearance
+        motion = try c.decodeIfPresent(MotionStyle.self, forKey: .motion) ?? d.motion
+        display = try c.decodeIfPresent(DisplayMode.self, forKey: .display) ?? d.display
+        quietHours = try c.decodeIfPresent(QuietHours.self, forKey: .quietHours) ?? d.quietHours
+        launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        sound = try c.decodeIfPresent(ArrivalSound.self, forKey: .sound) ?? d.sound
+        soundVolume = min(1, max(0, try c.decodeIfPresent(Double.self, forKey: .soundVolume) ?? d.soundVolume))
+        aiReviews = try c.decodeIfPresent(AIReviewDisplay.self, forKey: .aiReviews) ?? d.aiReviews
+        notifyAIReviews = try c.decodeIfPresent(Bool.self, forKey: .notifyAIReviews) ?? d.notifyAIReviews
     }
 
     /// Presets set both axes; each axis stays independently editable afterwards.

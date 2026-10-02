@@ -72,6 +72,27 @@ final class GitokenDatabase: Sendable {
                 t.column("collectedReason", .text)
             }
         }
+        migrator.registerMigration("v2-rich-bodies") { db in
+            // Cached timelines hold the pre-`RichBody` payload shape: drop them and let every row re-hydrate.
+            try db.execute(sql: "DELETE FROM \(DetailRow.databaseTableName)")
+            try db.execute(sql: "UPDATE \(ThreadRow.databaseTableName) SET hydratedThrough = NULL")
+            // Snippets were cut from raw markdown/HTML; reduce them to plain text until re-hydration replaces them
+            // (done rows are not re-hydrated until new activity arrives).
+            let rows = try Row.fetchAll(
+                db, sql: "SELECT rowid, preview FROM \(ThreadRow.databaseTableName) WHERE preview IS NOT NULL")
+            for row in rows {
+                guard let json: String = row["preview"],
+                      let preview = try? StorageJSON.decode(ActivityPreview.self, from: json),
+                      let snippet = preview.snippet
+                else { continue }
+                let cleaned = ActivityPreview(
+                    actor: preview.actor, verb: preview.verb,
+                    snippet: ActivityAnalysis.snippet(RichBody(markdown: snippet).plainText), at: preview.at)
+                try db.execute(
+                    sql: "UPDATE \(ThreadRow.databaseTableName) SET preview = ? WHERE rowid = ?",
+                    arguments: [try StorageJSON.encode(cleaned), row["rowid"] as Int64])
+            }
+        }
         return migrator
     }
 

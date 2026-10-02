@@ -73,6 +73,52 @@ struct SettingsView: View {
                 note(model.host.hasNotch ? "Floating pill sits below the menu bar instead of hugging the notch." : "This display has no notch, so Gitoken uses the floating pill.")
             }
 
+            section("Sound") {
+                card {
+                    row("Arrival sound") {
+                        segmented(ArrivalSound.allCases, selection: s.sound, label: \.title) { v in
+                            store.updateSettings { $0.sound = v }
+                            if v != .off { model.sounds.play(v, volume: s.soundVolume, reason: "preview") }
+                        }
+                    }
+                    row("Volume", last: true) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "speaker.fill").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Slider(
+                                value: Binding(get: { s.soundVolume }, set: { v in store.updateSettings { $0.soundVolume = v } }),
+                                in: 0...1
+                            ) { editing in
+                                guard !editing else { return }
+                                let current = store.settings
+                                model.sounds.play(current.sound, volume: current.soundVolume, reason: "preview")
+                            }
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .frame(width: 150)
+                            .accessibilityLabel("Sound volume")
+                            Image(systemName: "speaker.wave.3.fill").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        }
+                        .disabled(s.sound == .off)
+                        .opacity(s.sound == .off ? 0.45 : 1)
+                    }
+                }
+                note("Plays once per new arrival. Quiet mode, quiet hours, snooze and full-screen apps keep it silent.")
+            }
+
+            section("AI reviews") {
+                card {
+                    row("In conversations", detail: "Copilot, CodeRabbit and other review bots") {
+                        segmented(AIReviewDisplay.allCases, selection: s.aiReviews, label: \.title) { v in
+                            store.updateSettings { $0.aiReviews = v }
+                        }
+                    }
+                    row("Notify for AI reviews", detail: "Arrivals and sounds for AI-only activity", last: true) {
+                        Toggle("Notify for AI reviews", isOn: Binding(get: { s.notifyAIReviews }, set: { v in store.updateSettings { $0.notifyAIReviews = v } }))
+                            .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    }
+                }
+            }
+
             section("Focus") {
                 card {
                     row("Quiet mode", detail: "Collect activity without arrival animations") {

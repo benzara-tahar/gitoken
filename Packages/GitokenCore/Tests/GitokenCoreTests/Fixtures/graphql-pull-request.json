@@ -19,6 +19,8 @@
               "id": "IC_kwDOfixture1",
               "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
               "body": "Did you check the `?q=` deep-link flow?",
+              "bodyHTML": "<p dir=\"auto\">Did you check the <code class=\"notranslate\">?q=</code> deep-link flow?</p>",
+              "bodyText": "Did you check the ?q= deep-link flow?",
               "createdAt": "2026-09-29T13:00:00Z",
               "url": "https://github.com/platform/web/pull/142#issuecomment-5001"
             },

@@ -205,14 +205,21 @@ import Testing
         #expect(items.count == 10)
         guard items.count == 10 else { return }
 
-        guard case .event(.opened, let openedBody) = items[0].payload else {
+        guard case .opened(let openedBody) = items[0].payload else {
             Issue.record("first item should be the opening body, got \(items[0].payload)")
             return
         }
-        #expect(openedBody?.hasPrefix("Typing in global search") == true)
+        #expect(openedBody.markdown.hasPrefix("Typing in global search"))
         #expect(items[0].createdAt == iso("2026-09-29T12:20:00Z"))
 
-        #expect(items[1].payload == .comment(body: "Did you check the `?q=` deep-link flow?"))
+        #expect(items[1].payload == .comment(body: RichBody(
+            markdown: "Did you check the `?q=` deep-link flow?",
+            html: "<p dir=\"auto\">Did you check the <code class=\"notranslate\">?q=</code> deep-link flow?</p>",
+            plain: "Did you check the ?q= deep-link flow?")))
+        guard case .comment(let rendered) = items[1].payload else { return }
+        #expect(rendered.document.blocks == [.paragraph([
+            .text("Did you check the ", []), .text("?q=", .code), .text(" deep-link flow?", []),
+        ])])
         #expect(items[2].payload == .commits(count: 2, headlines: ["Handle initial query from URL", "Memoize row renderer"]))
         #expect(items[2].actor.login == "akim")
         #expect(items[2].createdAt == iso("2026-09-30T09:21:00Z"))
@@ -226,7 +233,7 @@ import Testing
             return
         }
         #expect(state == .changesRequested)
-        #expect(body == "A couple of things before this lands.")
+        #expect(body == "A couple of things before this lands.", "bodyHTML is optional; markdown-only bodies still decode")
         #expect(comments.map(\.databaseID) == [9001, 9002])
         #expect(comments[0].path == "src/components/SearchBox.tsx")
         #expect(comments[0].diffHunk.hasPrefix("@@ -28,13 +28,18 @@"))
@@ -320,6 +327,9 @@ import Testing
         #expect(reply.replyToID == "PRRC_fixture1", "replies thread under the root comment's node id")
         #expect(reply.path == "src/components/SearchBox.tsx")
         #expect(reply.line == 37)
+        #expect(reply.body.html == "<p dir=\"auto\">Moved the callback into a ref — thanks both.</p>")
+        #expect(stub.requests.first?.value(forHTTPHeaderField: "Accept") == "application/vnd.github.full+json",
+                "the full media type makes GitHub return body_html/body_text")
         let sent = try JSONSerialization.jsonObject(with: try #require(stub.requests.first?.httpBody)) as? [String: String]
         #expect(sent == ["body": "Moved the callback into a ref — thanks both."])
     }

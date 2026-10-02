@@ -17,6 +17,14 @@ struct ConversationView: View {
     @State private var landedOnDivider = false
     @State private var scrollToEndAfterSend = false
     @State private var snoozeAnchor: CGRect = .zero
+    /// Hidden AI reviews revealed for this visit only.
+    @State private var revealAI = false
+    @State private var nearBottom = true
+    /// Entries currently on screen, so the "new ↓" pill can disappear once its target scrolls into view.
+    @State private var visibleEntries: Set<String> = []
+    /// First new entry below the viewport, offered by the "new ↓" pill.
+    @State private var pendingNew: (id: String, count: Int)?
+    @State private var highlighted: String?
 
     var body: some View {
         if let group = model.group(id) {
@@ -34,6 +42,14 @@ struct ConversationView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
             }
             .frame(width: width)
+            .onChange(of: id) {
+                // Per-visit state belongs to the conversation, not to this view instance.
+                revealAI = false
+                pendingNew = nil
+                highlighted = nil
+                visibleEntries = []
+                landedOnDivider = false
+            }
         } else {
             VStack(spacing: 0) {
                 header
@@ -153,10 +169,15 @@ struct ConversationView: View {
     private func timeline(_ g: InboxGroup, state: ConversationState?) -> some View {
         let available = max(120, maxHeight - chromeHeight - composerHeight)
         if let detail = state?.detail {
+            let aiMode = model.store.settings.aiReviews
+            let hiddenAI = aiMode == .hide && !revealAI ? detail.items.filter(AIReviewers.isAIActivity) : []
+            let items = hiddenAI.isEmpty ? detail.items : detail.items.filter { !AIReviewers.isAIActivity($0) }
             let split = TimelineSplit(
-                items: detail.items, lastVisitAt: state?.lastVisitAt, viewer: model.viewerLogin,
+                items: items, lastVisitAt: state?.lastVisitAt, viewer: model.viewerLogin,
                 showAllOlder: model.olderShown.contains(id)
             )
+            let older = TimelineEntry.entries(for: split.older, collapseAI: aiMode == .collapse)
+            let newer = TimelineEntry.entries(for: split.newer, collapseAI: aiMode == .collapse)
             let context = TimelineContext(
                 group: g, viewer: model.viewerLogin, now: model.store.now.now(),
                 reviewComments: Self.reviewComments(detail.items)
@@ -184,14 +205,30 @@ struct ConversationView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 4)
                         }
-                        ForEach(split.older) { TimelineItemView(item: $0, context: context).id($0.id) }
+                        ForEach(older) { entryRow($0, context: context) }
                         if let label = split.dividerLabel {
                             SinceDivider(label: label).id(Self.dividerID)
-                            ForEach(split.newer) {
-                                TimelineItemView(item: $0, context: context)
-                                    .id($0.id)
+                            ForEach(newer) {
+                                entryRow($0, context: context)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
+                        }
+                        if !hiddenAI.isEmpty {
+                            Button { withAnimation(motion.open) { revealAI = true } } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "sparkles").font(.system(size: 10, weight: .semibold))
+                                    Text("\(Format.plural(hiddenAI.count, "AI review")) hidden · \(Text("Show").foregroundStyle(theme.accent).fontWeight(.semibold))")
+                                }
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .frame(height: 24)
+                                .background(Capsule().fill(theme.chipBackground))
+                                .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
                         }
                         Color.clear.frame(height: 1).id(Self.endID)
                     }
@@ -202,12 +239,28 @@ struct ConversationView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { timelineHeight = $0 }
                 }
                 .frame(height: min(timelineHeight, available))
-                .onAppear { land(proxy, hasDivider: split.dividerLabel != nil) }
-                .onChange(of: detail.items.count) { old, new in
-                    if scrollToEndAfterSend || old == 0 {
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 80
+                } action: { _, isNear in
+                    nearBottom = isNear
+                }
+                .overlay(alignment: .bottom) {
+                    if let pending = pendingNew, !visibleEntries.contains(pending.id) {
+                        NewActivityPill(label: pending.count == 0 ? "Newest" : "\(pending.count) new", symbol: "arrow.down") {
+                            reveal(pending.id, proxy: proxy)
+                        }
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .onAppear { land(proxy, split: split, entries: older + newer) }
+                .onChange(of: detail.items.map(\.id)) { old, new in
+                    if scrollToEndAfterSend || old.isEmpty {
                         scrollToEndAfterSend = false
                         withAnimation(motion.open) { proxy.scrollTo(Self.endID, anchor: .bottom) }
+                        return
                     }
+                    arrived(Set(new).subtracting(old), in: older + newer, proxy: proxy)
                 }
             }
         } else if let error = state?.error {
@@ -228,13 +281,76 @@ struct ConversationView: View {
         }
     }
 
-    /// Opens at the visit boundary so the newest unseen activity is the first thing read.
-    private func land(_ proxy: ScrollViewProxy, hasDivider: Bool) {
+    private func entryRow(_ entry: TimelineEntry, context: TimelineContext) -> some View {
+        TimelineEntryView(entry: entry, context: context)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(theme.accent.opacity(highlighted == entry.id ? 0.12 : 0))
+                    .padding(.horizontal, -6)
+            }
+            .id(entry.id)
+            .onScrollVisibilityChange(threshold: 0.2) { visible in
+                if visible {
+                    visibleEntries.insert(entry.id)
+                    if pendingNew?.id == entry.id { pendingNew = nil }
+                } else {
+                    visibleEntries.remove(entry.id)
+                }
+            }
+    }
+
+    /// New items appended while the panel is open: follow them when the reader is at the bottom, otherwise offer
+    /// them with the "new ↓" pill instead of yanking the scroll position.
+    private func arrived(_ newIDs: Set<String>, in entries: [TimelineEntry], proxy: ScrollViewProxy) {
+        let fresh = entries.filter { entry in
+            entry.itemIDs.contains(where: newIDs.contains) && !Self.isViewer(entry, model.viewerLogin)
+        }
+        guard let first = fresh.first else { return }
+        if nearBottom {
+            reveal(first.id, proxy: proxy)
+        } else {
+            withAnimation(motion.isReduced ? nil : .easeOut(duration: 0.2)) {
+                pendingNew = (pendingNew?.id ?? first.id, (pendingNew?.count ?? 0) + fresh.count)
+            }
+        }
+    }
+
+    private func reveal(_ entryID: String, proxy: ScrollViewProxy) {
+        withAnimation(motion.isReduced ? nil : motion.open) {
+            proxy.scrollTo(entryID, anchor: .top)
+            pendingNew = nil
+        }
+        highlighted = entryID
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(motion.isReduced ? nil : .easeOut(duration: 0.5)) {
+                if highlighted == entryID { highlighted = nil }
+            }
+        }
+    }
+
+    private static func isViewer(_ entry: TimelineEntry, _ viewer: String?) -> Bool {
+        let actor: Actor = switch entry {
+        case .item(let item), .aiReview(let item): item.actor
+        case .reviewRequests(let group): group.actor
+        }
+        return actor.login.caseInsensitiveCompare(viewer ?? "") == .orderedSame
+    }
+
+    /// Opens at the visit boundary so the newest unseen activity is the first thing read; when the newest item
+    /// is far below, the "new ↓" pill offers it.
+    private func land(_ proxy: ScrollViewProxy, split: TimelineSplit, entries: [TimelineEntry]) {
         guard !landedOnDivider else { return }
         landedOnDivider = true
         DispatchQueue.main.async {
-            if hasDivider {
+            if split.dividerLabel != nil {
                 proxy.scrollTo(Self.dividerID, anchor: .top)
+                let fresh = entries.filter { entry in
+                    !Self.isViewer(entry, model.viewerLogin)
+                        && split.newer.contains { entry.itemIDs.contains($0.id) }
+                }
+                // Count 0 labels the pill "Newest": nothing arrived during this visit, it just sits far below.
+                if fresh.count > 1, let newest = fresh.last { pendingNew = (newest.id, 0) }
             } else {
                 proxy.scrollTo(Self.endID, anchor: .bottom)
             }

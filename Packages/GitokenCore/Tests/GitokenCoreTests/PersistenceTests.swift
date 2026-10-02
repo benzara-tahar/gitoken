@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 @testable import GitokenCore
 
@@ -78,5 +79,39 @@ import Testing
         state.viewer = nil
         try db.save(state)
         #expect(try db.appState() == state, "single row is overwritten")
+    }
+
+    @Test func richBodiesMigrationDropsOldDetailsAndCleansSnippets() throws {
+        let queue = try DatabaseQueue()
+        try GitokenDatabase.migrator.migrate(queue, upTo: "v1")
+        var row = fullyPopulatedRow()
+        row.hydratedThrough = row.thread.updatedAt
+        row.preview = ActivityPreview(
+            actor: sarah, verb: .reviewed, snippet: "<!-- ccr-overview-v2 --> ## Copilot review overview **Findings:** 1", at: t0)
+        try queue.write { db in
+            try db.execute(
+                sql: "INSERT INTO threadDetail (accountHost, accountLogin, threadID, detail, fetchedAt) VALUES (?, ?, ?, ?, ?)",
+                arguments: [account.host, account.login, row.id.rawValue, #"{"items":[{"payload":{"comment":{"body":"raw"}}}]}"#, 0])
+        }
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO thread (accountHost, accountLogin, id, thread, updatedAt, unread, state, preview, actors,
+                unseenCount, hydratedThrough, keptLocally) VALUES (?, ?, ?, ?, ?, 1, 'open', ?, '[]', 0, ?, 0)
+                """,
+                arguments: [
+                    account.host, account.login, row.id.rawValue,
+                    String(decoding: try JSONEncoder().encode(row.thread), as: UTF8.self),
+                    row.thread.updatedAt.timeIntervalSinceReferenceDate,
+                    String(decoding: try JSONEncoder().encode(row.preview), as: UTF8.self),
+                    row.thread.updatedAt.timeIntervalSinceReferenceDate,
+                ])
+        }
+
+        let db = try GitokenDatabase(queue: queue)
+        #expect(try db.detail(for: row.id, account: account) == nil, "old-shape timelines are dropped, not decoded")
+        let migrated = try #require(try db.threads(for: account).first)
+        #expect(migrated.hydratedThrough == nil, "rows re-hydrate to rebuild previews from rich bodies")
+        #expect(migrated.preview?.snippet == "Copilot review overview Findings: 1")
+        #expect(migrated.preview?.actor == sarah)
     }
 }

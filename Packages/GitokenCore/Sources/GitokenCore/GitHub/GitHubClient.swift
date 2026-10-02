@@ -80,7 +80,7 @@ public final class GitHubClient: GitHubService {
 
     public func postComment(repo: RepoRef, number: Int, body: String) async throws(GitHubError) -> TimelineItem {
         let url = Self.apiBase.appending(path: "repos/\(repo.owner)/\(repo.name)/issues/\(number)/comments")
-        let (data, _) = try await send("POST", url, body: try Self.jsonBody(["body": body]))
+        let (data, _) = try await send("POST", url, body: try Self.jsonBody(["body": body]), headers: Self.fullMediaType)
         return try GitHubJSON.decode(RESTIssueComment.self, from: data, decoder: GitHubJSON.restDecoder()).timelineItem
     }
 
@@ -89,7 +89,7 @@ public final class GitHubClient: GitHubService {
     {
         let repoPath = "repos/\(repo.owner)/\(repo.name)/pulls"
         let url = Self.apiBase.appending(path: "\(repoPath)/\(number)/comments/\(commentDatabaseID)/replies")
-        let (data, _) = try await send("POST", url, body: try Self.jsonBody(["body": body]))
+        let (data, _) = try await send("POST", url, body: try Self.jsonBody(["body": body]), headers: Self.fullMediaType)
         let decoder = GitHubJSON.restDecoder()
         let reply = try GitHubJSON.decode(RESTReviewComment.self, from: data, decoder: decoder)
         // REST reports the parent as a database id; the domain threads replies by GraphQL node id.
@@ -98,6 +98,9 @@ public final class GitHubClient: GitHubService {
         let parent = try GitHubJSON.decode(RESTNodeID.self, from: parentData, decoder: decoder)
         return reply.reviewComment(replyToID: parent.nodeId)
     }
+
+    /// Makes comment responses carry `body_html` / `body_text` alongside the markdown `body`.
+    private static let fullMediaType = ["Accept": "application/vnd.github.full+json"]
 
     // MARK: - Transport
 

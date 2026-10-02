@@ -9,6 +9,16 @@ struct InboxListView: View {
     var maxHeight: CGFloat
     @State private var contentHeight: CGFloat = 0
     @State private var chromeHeight: CGFloat = 0
+    @State private var atTop = true
+    @State private var lastScrollAt: Date = .distantPast
+    @State private var visibleRows: Set<ThreadID> = []
+    /// Rows that just moved up with new activity; flash-highlighted briefly.
+    @State private var flashed: Set<ThreadID> = []
+    /// Topmost updated row while it is off screen and the user is mid-scroll.
+    @State private var pendingUpdate: (id: ThreadID, count: Int)?
+
+    /// The list follows new activity only after the user stopped scrolling for this long.
+    private static let idleBeforeFollowing: TimeInterval = 1.5
 
     var body: some View {
         let store = model.store
@@ -30,6 +40,25 @@ struct InboxListView: View {
                 }
                 .scrollIndicators(.automatic)
                 .frame(height: max(60, min(contentHeight, maxHeight - chromeHeight - footerHeight)))
+                .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 24 } action: { _, top in
+                    atTop = top
+                    if top { pendingUpdate = nil }
+                }
+                .onScrollPhaseChange { _, phase in
+                    if phase != .idle { lastScrollAt = Date() }
+                }
+                .overlay(alignment: .top) {
+                    if let pending = pendingUpdate, !visibleRows.contains(pending.id) {
+                        NewActivityPill(label: "\(pending.count) updated", symbol: "arrow.up") {
+                            follow(pending.id, proxy: proxy)
+                        }
+                        .padding(.top, 6)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .onChange(of: Self.activity(buckets)) { old, new in
+                    updated(old: old, new: new, order: (buckets.new + buckets.pending).map(\.id), proxy: proxy)
+                }
                 .onChange(of: model.selectedRow) { _, id in
                     guard let id else { return }
                     withAnimation(motion.fade) { proxy.scrollTo(id, anchor: nil) }
@@ -48,6 +77,64 @@ struct InboxListView: View {
         if model.quietStatus != nil { h += 36 }
         if model.store.lastSyncError != nil { h += 30 }
         return h
+    }
+
+    // MARK: Following new activity
+
+    private static func activity(_ b: Buckets) -> [ThreadID: Date] {
+        Dictionary((b.new + b.pending).map { ($0.id, $0.lastActivityAt) }, uniquingKeysWith: max)
+    }
+
+    /// A group got new activity (it moves to the top): flash it, and bring it into view — right away when the user
+    /// isn't scrolling, otherwise via the "updated ↑" pill.
+    private func updated(old: [ThreadID: Date], new: [ThreadID: Date], order: [ThreadID], proxy: ScrollViewProxy) {
+        let changed = order.filter { id in
+            guard let at = new[id] else { return false }
+            return old[id].map { $0 < at } ?? !old.isEmpty
+        }
+        guard let top = changed.first else { return }
+        flash(Set(changed))
+        guard !atTop, !visibleRows.contains(top) else { return }
+        if Date().timeIntervalSince(lastScrollAt) >= Self.idleBeforeFollowing {
+            follow(top, proxy: proxy)
+        } else {
+            withAnimation(motion.isReduced ? nil : .easeOut(duration: 0.2)) {
+                pendingUpdate = (top, (pendingUpdate?.count ?? 0) + changed.count)
+            }
+        }
+    }
+
+    private func follow(_ id: ThreadID, proxy: ScrollViewProxy) {
+        withAnimation(motion.isReduced ? nil : motion.open) {
+            proxy.scrollTo(id, anchor: .top)
+            pendingUpdate = nil
+        }
+        flash([id])
+    }
+
+    private func flash(_ ids: Set<ThreadID>) {
+        flashed.formUnion(ids)
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(motion.isReduced ? nil : .easeOut(duration: 0.5)) { flashed.subtract(ids) }
+        }
+    }
+
+    private func row(_ group: InboxGroup, bucket: InboxBucket, now: Date) -> some View {
+        InboxRow(group: group, bucket: bucket, now: now)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(theme.accent.opacity(flashed.contains(group.id) ? 0.14 : 0))
+            }
+            .id(group.id)
+            .onScrollVisibilityChange(threshold: 0.5) { visible in
+                if visible {
+                    visibleRows.insert(group.id)
+                    if pendingUpdate?.id == group.id { pendingUpdate = nil }
+                } else {
+                    visibleRows.remove(group.id)
+                }
+            }
     }
 
     // MARK: Header
@@ -104,7 +191,7 @@ struct InboxListView: View {
                 }
                 .id("section-snoozed")
                 if model.showSnoozed {
-                    ForEach(b.snoozed) { InboxRow(group: $0, bucket: .snoozed, now: now).id($0.id) }
+                    ForEach(b.snoozed) { row($0, bucket: .snoozed, now: now) }
                 }
             }
             if !b.done.isEmpty {
@@ -113,7 +200,7 @@ struct InboxListView: View {
                 }
                 .id("section-done")
                 if model.showDone {
-                    ForEach(b.done) { InboxRow(group: $0, bucket: .done, now: now).id($0.id) }
+                    ForEach(b.done) { row($0, bucket: .done, now: now) }
                 }
             }
         }
@@ -124,7 +211,7 @@ struct InboxListView: View {
         if !groups.isEmpty {
             SectionHeader(title: title, count: groups.count, expanded: nil, toggle: nil)
                 .id("section-\(bucket.rawValue)")
-            ForEach(groups) { InboxRow(group: $0, bucket: bucket, now: now).id($0.id) }
+            ForEach(groups) { row($0, bucket: bucket, now: now) }
         }
     }
 

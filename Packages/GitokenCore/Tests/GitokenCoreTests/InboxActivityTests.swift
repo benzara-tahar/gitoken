@@ -59,7 +59,7 @@ import Testing
             comment("old", by: sarah, at: t0 - 300), comment("mine", by: me, at: t0 - 200),
             comment("new", by: omar, at: t0 - 100), TimelineItem(id: "ci", actor: ciBot, createdAt: t0 - 50,
                 payload: .checks(CheckSummary(status: .success, commitSHA: "a", failedChecks: [], passedCount: 4, pendingCount: 0)), url: nil),
-        ]), viewer: me)
+        ]), viewer: me, includeAI: true)
         #expect(row.unseenCount == 2)
         #expect(row.preview?.verb == .checksPassed)
         #expect(row.actors == [sarah, omar])

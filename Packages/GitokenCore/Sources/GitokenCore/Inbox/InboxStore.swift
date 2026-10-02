@@ -124,9 +124,23 @@ public final class InboxStore {
         var next = settings
         change(&next)
         guard next != settings else { return }
+        let reanalyze = next.notifyAIReviews != settings.notifyAIReviews
         settings = next
         saveAppState()
         syncQuietState()
+        if reanalyze { reabsorbCachedDetails() }
+    }
+
+    /// Re-derives previews/participants/unseen counts from cached timelines after the AI-review policy changed.
+    private func reabsorbCachedDetails() {
+        guard let account, let viewer else { return }
+        var changed: [TrackedThread] = []
+        for (id, var row) in rows where !row.needsHydration {
+            guard let detail = conversations[id]?.detail ?? cachedDetail(id, account: account) else { continue }
+            row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews)
+            changed.append(row)
+        }
+        store(changed)
     }
 
     public private(set) var manualQuiet: Bool = false
@@ -172,7 +186,7 @@ public final class InboxStore {
             saveDetail(detail, account: account)
             guard var row = rows[id], self.viewer == viewer else { break }
             if let newest = detail.items.last?.createdAt { row.markSeen(through: newest) }
-            if row.thread.updatedAt == thread.updatedAt { row.absorb(detail, viewer: viewer) }
+            if row.thread.updatedAt == thread.updatedAt { row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews) }
             store([row])
         case .failure(let error):
             conversations[id]?.error = error
@@ -553,7 +567,7 @@ public final class InboxStore {
             }
             switch result {
             case .success(let detail):
-                row.absorb(detail, viewer: viewer)
+                row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews)
                 details[thread.id] = detail
                 if conversations[thread.id] != nil { conversations[thread.id]?.detail = detail }
                 saveDetail(detail, account: account)
@@ -571,9 +585,16 @@ public final class InboxStore {
         var collectedChanged = false
         for change in changes where change.announce {
             guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current) else { continue }
+            let includeAI = settings.notifyAIReviews
             let fresh = details[change.id].map {
-                ActivityAnalysis.items(in: $0, byOthersThan: viewer, after: change.previousUpdatedAt)
+                ActivityAnalysis.items(in: $0, byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
             } ?? []
+            // AI-only activity stays in the inbox (GitHub still lists it unread) but is not announced.
+            if !includeAI, fresh.isEmpty, let detail = details[change.id],
+               !ActivityAnalysis.items(in: detail, byOthersThan: viewer, after: change.previousUpdatedAt).isEmpty
+            {
+                continue
+            }
             let count = change.previousUpdatedAt == nil ? 1 : max(1, fresh.count)
             // Bots (CI) only show when no human took part in the new activity.
             let humans = fresh.map(\.actor).filter { !$0.isBot }

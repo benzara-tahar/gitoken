@@ -30,16 +30,16 @@ func makeThread(
 }
 
 func comment(_ id: String, by actor: Actor, at date: Date, _ body: String = "Looks good") -> TimelineItem {
-    TimelineItem(id: id, actor: actor, createdAt: date, payload: .comment(body: body), url: nil)
+    TimelineItem(id: id, actor: actor, createdAt: date, payload: .comment(body: RichBody(markdown: body)), url: nil)
 }
 
 func review(_ id: String, by actor: Actor, at date: Date, _ state: ReviewState, comments: [ReviewComment] = []) -> TimelineItem {
-    TimelineItem(id: id, actor: actor, createdAt: date, payload: .review(state: state, body: "", comments: comments), url: nil)
+    TimelineItem(id: id, actor: actor, createdAt: date, payload: .review(state: state, body: .empty, comments: comments), url: nil)
 }
 
 func reviewComment(_ id: String, databaseID: Int, by actor: Actor, at date: Date, _ body: String) -> ReviewComment {
     ReviewComment(
-        id: id, databaseID: databaseID, author: actor, body: body, createdAt: date, path: "src/app.ts",
+        id: id, databaseID: databaseID, author: actor, body: RichBody(markdown: body), createdAt: date, path: "src/app.ts",
         diffHunk: "@@ -1,2 +1,2 @@\n-a\n+b", line: 2, replyToID: nil, url: nil)
 }
 
@@ -157,7 +157,7 @@ final class ScriptedGitHub: GitHubService {
         let result: Result<TimelineItem, GitHubError> = update { s in
             if let error = s.postError { return .failure(error) }
             s.postedBodies.append(body)
-            let item = TimelineItem(id: "posted-\(s.postedBodies.count)", actor: me, createdAt: now, payload: .comment(body: body), url: nil)
+            let item = TimelineItem(id: "posted-\(s.postedBodies.count)", actor: me, createdAt: now, payload: .comment(body: RichBody(markdown: body)), url: nil)
             s.timelines[ThreadID(String(number)), default: []].append(item)
             return .success(item)
         }
@@ -171,7 +171,7 @@ final class ScriptedGitHub: GitHubService {
         return update { s in
             s.postedBodies.append(body)
             return ReviewComment(
-                id: "reply-\(s.postedBodies.count)", databaseID: 9000 + s.postedBodies.count, author: me, body: body,
+                id: "reply-\(s.postedBodies.count)", databaseID: 9000 + s.postedBodies.count, author: me, body: RichBody(markdown: body),
                 createdAt: now, path: "src/app.ts", diffHunk: "", line: 2, replyToID: nil, url: nil)
         }
     }

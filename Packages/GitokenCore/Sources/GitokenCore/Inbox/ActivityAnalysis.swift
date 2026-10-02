@@ -10,8 +10,10 @@ enum ActivityAnalysis {
     }
 
     /// Newest item not authored by the viewer, falling back to the newest item overall. Items are oldest first.
-    static func preview(of detail: ThreadDetail, viewer: Actor) -> ActivityPreview? {
-        guard let item = detail.items.last(where: { !isViewer($0.actor, viewer) }) ?? detail.items.last else { return nil }
+    /// With `includeAI` false, AI reviewers' items are ignored entirely (the preview shows human activity).
+    static func preview(of detail: ThreadDetail, viewer: Actor, includeAI: Bool = true) -> ActivityPreview? {
+        let items = relevant(detail.items, includeAI: includeAI)
+        guard let item = items.last(where: { !isViewer($0.actor, viewer) }) ?? items.last else { return nil }
         return preview(of: item, viewer: viewer)
     }
 
@@ -21,15 +23,22 @@ enum ActivityAnalysis {
     }
 
     /// Most recent distinct non-viewer, non-bot participants, newest last.
-    static func actors(in detail: ThreadDetail, viewer: Actor) -> [Actor] {
-        [Actor]().merging(detail.items.map(\.actor).filter { !$0.isBot && !isViewer($0, viewer) })
+    static func actors(in detail: ThreadDetail, viewer: Actor, includeAI: Bool = true) -> [Actor] {
+        let items = relevant(detail.items, includeAI: includeAI)
+        return [Actor]().merging(items.map(\.actor).filter { !$0.isBot && !isViewer($0, viewer) })
     }
 
     /// Items by anyone but the viewer created strictly after `boundary` (all of them when `boundary` is nil).
-    static func items(in detail: ThreadDetail, byOthersThan viewer: Actor, after boundary: Date?) -> [TimelineItem] {
-        detail.items.filter { item in
+    static func items(
+        in detail: ThreadDetail, byOthersThan viewer: Actor, after boundary: Date?, includeAI: Bool = true
+    ) -> [TimelineItem] {
+        relevant(detail.items, includeAI: includeAI).filter { item in
             !isViewer(item.actor, viewer) && boundary.map { item.createdAt > $0 } ?? true
         }
+    }
+
+    private static func relevant(_ items: [TimelineItem], includeAI: Bool) -> [TimelineItem] {
+        includeAI ? items : items.filter { !AIReviewers.isAI($0.actor) }
     }
 
     /// `@login` as a whole handle: not part of an email address or a longer handle.
@@ -60,15 +69,17 @@ enum ActivityAnalysis {
 
     private static func describe(_ payload: TimelinePayload, viewer: Actor) -> (ActivityVerb, String?) {
         switch payload {
+        case .opened(let body):
+            return (.opened, body.plainText)
         case .comment(let body):
-            return (mentions(viewer, in: body) ? .mentioned : .commented, body)
+            return (mentions(viewer, in: body.markdown) ? .mentioned : .commented, body.plainText)
         case .review(let state, let body, let comments):
-            let text = body.isEmpty ? comments.first?.body : body
+            let text = body.isEmpty ? comments.first?.body.plainText : body.plainText
             switch state {
             case .approved: return (.approved, text)
             case .changesRequested: return (.requestedChanges, text)
             case .commented, .dismissed, .pending:
-                let mentioned = mentions(viewer, in: body) || comments.contains { mentions(viewer, in: $0.body) }
+                let mentioned = mentions(viewer, in: body.markdown) || comments.contains { mentions(viewer, in: $0.body.markdown) }
                 return (mentioned ? .mentioned : .reviewed, text)
             }
         case .commits(let count, let headlines):
@@ -81,7 +92,6 @@ enum ActivityAnalysis {
             }
         case .event(let kind, let detail):
             switch kind {
-            case .opened: return (.opened, detail)
             case .closed: return (.closed, detail)
             case .reopened: return (.reopened, detail)
             case .merged: return (.merged, detail)

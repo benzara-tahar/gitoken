@@ -15,6 +15,7 @@ enum FixtureSeed {
         "pnair": Actor(login: "pnair", name: "Priya Nair"),
         "jberg": Actor(login: "jberg", name: "Jonas Berg"),
         "github-actions": Actor(login: "github-actions", name: "GitHub Actions", isBot: true),
+        "copilot-pull-request-reviewer": Actor(login: "copilot-pull-request-reviewer", name: "Copilot", isBot: true),
     ]
 
     static func person(_ login: String) -> Actor { people[login] ?? Actor(login: login) }
@@ -131,15 +132,16 @@ enum FixtureSeed {
     // MARK: Events
 
     enum Event: Sendable {
-        case opened(String)
-        case comment(String)
+        case opened(RichBody)
+        case comment(RichBody)
         /// `key` names the comment so scripted replies can thread under it.
-        case reviewComment(key: String?, hunk: Hunk, line: Int, body: String)
-        case reply(toKey: String, body: String)
-        case review(ReviewState, String)
+        case reviewComment(key: String?, hunk: Hunk, line: Int, body: RichBody)
+        case reply(toKey: String, body: RichBody)
+        case review(ReviewState, RichBody)
         case checks(CheckSummary)
         case push([String])
-        case reviewRequested
+        /// A login, or an `org/team` slug for a team.
+        case reviewRequested(from: String)
         case merged
         case closed(String?)
         case reopened(String?)
@@ -186,11 +188,15 @@ enum FixtureSeed {
 
     static let threads: [Thread] = [
         Thread(subject: web142, steps: [
-            Step(1560, "akim", .opened("Typing in global search fires a request per keystroke and re-renders the entire result list. This debounces the input (250ms), aborts stale requests, and memoizes `ResultRow`.\n\nCloses #131.")),
+            Step(1560, "akim", .opened("Typing in global search fires a request per keystroke and re-renders the entire result list. This debounces the input (250ms), aborts stale requests, and memoizes `ResultRow`.\n\nCloses #131.\n\n### Checklist\n\n- [x] Debounce input and abort stale requests\n- [x] Handle the `?q=` deep link\n- [ ] Memoize result rows\n  - key rows by `result.id`\n  - profile with the 2k-row fixture")),
             Step(1552, "github-actions", .checks(ci("c81d0e4"))),
             Step(1500, "leom", .comment("Nice — this cuts request volume a lot. Did you check the `?q=` deep-link flow? That path sets the value before the debounce hook mounts.")),
             Step(1440, "akim", .comment("Good catch. Added a test for the deep-link case in `SearchBox.test.tsx`.")),
             Step(300, "akim", .push(["Handle initial query from URL", "Memoize row renderer"])),
+            Step(299, "akim", .reviewRequested(from: "schen")),
+            Step(298.5, "akim", .reviewRequested(from: "platform/web-core")),
+            Step(298, "akim", .reviewRequested(from: "platform/design-systems")),
+            Step(52, "copilot-pull-request-reviewer", .review(.commented, copilotOverview)),
             Step(48, "schen", .reviewComment(key: "w142-rc1", hunk: searchHunk, line: 37, body: "This effect re-subscribes on every keystroke because `onSearch` is recreated by the parent on each render. Could we wrap it in `useCallback` upstream, or keep the latest callback in a ref here?")),
             Step(45, "schen", .reviewComment(key: "w142-rc2", hunk: resultsHunk, line: 23, body: "`key={index}` will defeat the row memoization as soon as results reorder. Can we key by `result.id`?")),
             Step(40, "github-actions", .checks(ci("7be0d44", failed: ["lint", "unit-tests"]))),
@@ -199,7 +205,8 @@ enum FixtureSeed {
 
         Thread(subject: Subject(repo: "api", number: 87, kind: .pullRequest, title: "Add idempotency keys to payment intents", reason: .reviewRequested, author: "dpatel"), steps: [
             Step(190, "dpatel", .opened("Adds an `Idempotency-Key` header to `POST /v1/payment_intents`. Keys live in Redis for 24h alongside the serialized response, so retries from the mobile client return the original result instead of charging twice.\n\nOpen question: should reusing a key with a *different* body return 409 or 422?")),
-            Step(189, "dpatel", .reviewRequested),
+            Step(189, "dpatel", .reviewRequested(from: viewerLogin)),
+            Step(189, "dpatel", .reviewRequested(from: "platform/payments")),
             Step(176, "github-actions", .checks(ci("5e02a7b"))),
             Step(70, "mokafor", .reviewComment(key: "a87-rc1", hunk: idempotencyHunk, line: 53, body: "If two requests with the same key race, both can miss the cache and execute the handler. Should this take a `SETNX` lock before calling `next`?")),
             Step(22, "dpatel", .comment("@akim when you get a chance — you wrote the original retry middleware, so I'd love your eyes on the lock semantics.")),
@@ -233,7 +240,7 @@ enum FixtureSeed {
 
         Thread(subject: Subject(repo: "ui-kit", number: 298, kind: .pullRequest, title: "Tokens: rename spacing scale to t-shirt sizes", reason: .reviewRequested, author: "pnair"), steps: [
             Step(1420, "pnair", .opened("Renames `space-1…space-12` to `space-3xs…space-3xl`. A codemod lives in `scripts/codemods/spacing.ts`.")),
-            Step(1419, "pnair", .reviewRequested),
+            Step(1419, "pnair", .reviewRequested(from: viewerLogin)),
             Step(1400, "github-actions", .checks(ci("0d9e6aa"))),
         ], seen: .all),
 
@@ -266,7 +273,7 @@ enum FixtureSeed {
             create: Thread(subject: Subject(repo: "web", number: 147, kind: .pullRequest, title: "Prefetch dashboard routes on hover", reason: .reviewRequested, author: "trivera"), steps: [
                 Step(3, "trivera", .opened("Calls `router.prefetch` on pointerenter for dashboard nav links. Adds ~6 KB to the nav chunk but drops cold route transitions from ~420ms to ~90ms.")),
             ]),
-            actor: "trivera", event: .reviewRequested
+            actor: "trivera", event: .reviewRequested(from: viewerLogin)
         ),
         Arrival(key: "platform/ui-kit#311", create: nil, actor: "pnair", event: .comment("Opened #314 with a fix that keeps the grace timer alive across scroll events. @akim does that match what you intended in #276?")),
         Arrival(key: "platform/api#87", create: nil, actor: "dpatel", event: .reply(toKey: "a87-rc1", body: "Good call — switched to `SET NX PX` with the request hash as the value. Reusing a key with a different body now returns 409.")),

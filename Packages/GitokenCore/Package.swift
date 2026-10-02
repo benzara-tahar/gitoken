@@ -9,11 +9,15 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.13.9"),
     ],
     targets: [
         .target(
             name: "GitokenCore",
-            dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

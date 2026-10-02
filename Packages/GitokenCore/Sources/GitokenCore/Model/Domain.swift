@@ -179,6 +179,30 @@ public struct CheckSummary: Hashable, Codable, Sendable {
     }
 }
 
+/// Comment/description text as GitHub serves it: the markdown source plus GitHub's rendered HTML and plain text
+/// when available. Fixtures and local drafts carry markdown only; rendering converts it (see `RichDocument`).
+public struct RichBody: Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public let markdown: String
+    public let html: String?
+    public let plain: String?
+
+    public init(markdown: String, html: String? = nil, plain: String? = nil) {
+        self.markdown = markdown
+        self.html = html.flatMap { $0.isEmpty ? nil : $0 }
+        self.plain = plain
+    }
+
+    public init(stringLiteral value: String) {
+        self.init(markdown: value)
+    }
+
+    public static let empty = RichBody(markdown: "")
+
+    public var isEmpty: Bool {
+        markdown.allSatisfy(\.isWhitespace) && (html ?? "").allSatisfy(\.isWhitespace)
+    }
+}
+
 /// A review comment anchored to code.
 public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
     /// GraphQL node id.
@@ -186,7 +210,7 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
     /// REST id, needed for `POST /pulls/{n}/comments/{id}/replies`.
     public let databaseID: Int
     public let author: Actor
-    public let body: String
+    public let body: RichBody
     public let createdAt: Date
     public let path: String
     /// Unified diff hunk ending at the commented line (GitHub `diffHunk`).
@@ -196,7 +220,7 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
     public let replyToID: String?
     public let url: URL?
     public init(
-        id: String, databaseID: Int, author: Actor, body: String, createdAt: Date, path: String, diffHunk: String,
+        id: String, databaseID: Int, author: Actor, body: RichBody, createdAt: Date, path: String, diffHunk: String,
         line: Int?, replyToID: String?, url: URL?
     ) {
         self.id = id
@@ -213,12 +237,14 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
 }
 
 public enum TimelineEventKind: String, Codable, Sendable {
-    case opened, closed, reopened, merged, reviewRequested, readyForReview, convertedToDraft, assigned, headRefForcePushed
+    case closed, reopened, merged, reviewRequested, readyForReview, convertedToDraft, assigned, headRefForcePushed
 }
 
 public enum TimelinePayload: Hashable, Codable, Sendable {
-    case comment(body: String)
-    case review(state: ReviewState, body: String, comments: [ReviewComment])
+    /// The PR/issue description, synthesized as the first item when the timeline reaches back to the start.
+    case opened(body: RichBody)
+    case comment(body: RichBody)
+    case review(state: ReviewState, body: RichBody, comments: [ReviewComment])
     case commits(count: Int, headlines: [String])
     case checks(CheckSummary)
     case event(TimelineEventKind, detail: String?)

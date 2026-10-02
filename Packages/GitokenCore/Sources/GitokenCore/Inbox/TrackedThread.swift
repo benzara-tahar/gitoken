@@ -39,10 +39,13 @@ struct TrackedThread: Equatable, Sendable {
         seenThrough = max(seenThrough ?? date, date)
     }
 
-    mutating func absorb(_ detail: ThreadDetail, viewer: Actor) {
-        preview = ActivityAnalysis.preview(of: detail, viewer: viewer) ?? .generic(at: thread.updatedAt)
-        actors = ActivityAnalysis.actors(in: detail, viewer: viewer)
-        unseenCount = ActivityAnalysis.items(in: detail, byOthersThan: viewer, after: lastVisitAt ?? thread.lastReadAt).count
+    /// `includeAI` false leaves AI reviewers out of the preview, participants and unseen count.
+    mutating func absorb(_ detail: ThreadDetail, viewer: Actor, includeAI: Bool) {
+        preview = ActivityAnalysis.preview(of: detail, viewer: viewer, includeAI: includeAI) ?? .generic(at: thread.updatedAt)
+        actors = ActivityAnalysis.actors(in: detail, viewer: viewer, includeAI: includeAI)
+        unseenCount = ActivityAnalysis.items(
+            in: detail, byOthersThan: viewer, after: lastVisitAt ?? thread.lastReadAt, includeAI: includeAI
+        ).count
         state = detail.state
         hydratedThrough = thread.updatedAt
     }

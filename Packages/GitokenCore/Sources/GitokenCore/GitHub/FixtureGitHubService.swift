@@ -176,7 +176,7 @@ public final class FixtureGitHubService: GitHubService {
         let at = now.now()
         let item: TimelineItem? = state.withLock { state in
             guard let index = state.index(repo: repo, number: number) else { return nil }
-            Self.record(.comment(body), by: FixtureSeed.viewerLogin, at: at, onThreadAt: index, in: &state)
+            Self.record(.comment(RichBody(markdown: body)), by: FixtureSeed.viewerLogin, at: at, onThreadAt: index, in: &state)
             return state.threads[index].items.last
         }
         guard let item else { throw .http(status: 404, message: "Not Found") }
@@ -191,8 +191,9 @@ public final class FixtureGitHubService: GitHubService {
             guard let index = state.index(repo: repo, number: number),
                 let parent = Self.reviewComments(in: state.threads[index]).first(where: { $0.databaseID == commentDatabaseID })
             else { return nil }
-            let comment = Self.makeReply(to: parent, by: FixtureSeed.viewerLogin, body: body, at: at, in: &state)
-            Self.appendReview(state: .commented, body: "", comments: [comment], by: FixtureSeed.viewerLogin, at: at, onThreadAt: index, in: &state)
+            let comment = Self.makeReply(
+                to: parent, by: FixtureSeed.viewerLogin, body: RichBody(markdown: body), at: at, in: &state)
+            Self.appendReview(state: .commented, body: .empty, comments: [comment], by: FixtureSeed.viewerLogin, at: at, onThreadAt: index, in: &state)
             return comment
         }
         guard let reply else { throw .http(status: 404, message: "Not Found") }
@@ -254,7 +255,7 @@ public final class FixtureGitHubService: GitHubService {
 
         switch event {
         case .opened(let body):
-            append(.event(.opened, detail: body))
+            append(.opened(body: body))
         case .comment(let body):
             append(.comment(body: body))
         case .reviewComment(let key, let hunk, let line, let body):
@@ -265,19 +266,19 @@ public final class FixtureGitHubService: GitHubService {
                 createdAt: at, path: hunk.file, diffHunk: hunk.diffHunk(endingAt: line), line: line, replyToID: nil,
                 url: url.appending(path: "files")
             )
-            appendReview(state: .commented, body: "", comments: [comment], by: login, at: at, onThreadAt: index, in: &state)
+            appendReview(state: .commented, body: .empty, comments: [comment], by: login, at: at, onThreadAt: index, in: &state)
         case .reply(let key, let body):
             guard let parent = reviewComments(in: thread).first(where: { $0.id == "PRRC_fx\(key)" }) else { return }
             let comment = makeReply(to: parent, by: login, body: body, at: at, in: &state)
-            appendReview(state: .commented, body: "", comments: [comment], by: login, at: at, onThreadAt: index, in: &state)
+            appendReview(state: .commented, body: .empty, comments: [comment], by: login, at: at, onThreadAt: index, in: &state)
         case .review(let reviewState, let body):
             append(.review(state: reviewState, body: body, comments: []))
         case .checks(let summary):
             append(.checks(summary))
         case .push(let headlines):
             append(.commits(count: headlines.count, headlines: headlines))
-        case .reviewRequested:
-            append(.event(.reviewRequested, detail: FixtureSeed.viewerLogin))
+        case .reviewRequested(let reviewer):
+            append(.event(.reviewRequested, detail: reviewer))
         case .merged:
             append(.event(.merged, detail: nil))
             state.threads[index].state = .merged
@@ -291,7 +292,7 @@ public final class FixtureGitHubService: GitHubService {
     }
 
     private static func appendReview(
-        state reviewState: ReviewState, body: String, comments: [ReviewComment], by login: String, at: Date,
+        state reviewState: ReviewState, body: RichBody, comments: [ReviewComment], by login: String, at: Date,
         onThreadAt index: Int, in state: inout State
     ) {
         let id = "fx-item-\(state.nextItem)"
@@ -303,7 +304,7 @@ public final class FixtureGitHubService: GitHubService {
         ))
     }
 
-    private static func makeReply(to parent: ReviewComment, by login: String, body: String, at: Date, in state: inout State)
+    private static func makeReply(to parent: ReviewComment, by login: String, body: RichBody, at: Date, in state: inout State)
         -> ReviewComment
     {
         let databaseID = state.nextCommentDatabaseID

@@ -6,22 +6,22 @@ enum GraphQLQueries {
         """
 
     private static let reviewCommentFields = """
-        id databaseId author { ...ActorFields } body createdAt path diffHunk line originalLine replyTo { id } url
+        id databaseId author { ...ActorFields } body bodyHTML bodyText createdAt path diffHunk line originalLine replyTo { id } url
         """
 
     static let pullRequest = """
         query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
           repository(owner: $owner, name: $name) {
             pullRequest(number: $number) {
-              id title state isDraft merged url body createdAt
+              id title state isDraft merged url body bodyHTML bodyText createdAt
               author { ...ActorFields }
               timelineItems(last: 60, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_COMMIT, REVIEW_REQUESTED_EVENT, MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, HEAD_REF_FORCE_PUSHED_EVENT]) {
                 pageInfo { hasPreviousPage }
                 nodes {
                   __typename
-                  ... on IssueComment { id author { ...ActorFields } body createdAt url }
+                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url }
                   ... on PullRequestReview {
-                    id author { ...ActorFields } body state createdAt url
+                    id author { ...ActorFields } body bodyHTML bodyText state createdAt url
                     comments(first: 30) { nodes { \(reviewCommentFields) } }
                   }
                   ... on PullRequestCommit {
@@ -30,7 +30,7 @@ enum GraphQLQueries {
                   }
                   ... on ReviewRequestedEvent {
                     id actor { ...ActorFields } createdAt
-                    requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { teamName: name } }
+                    requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Mannequin { login } ... on Team { teamName: combinedSlug } }
                   }
                   ... on MergedEvent { id actor { ...ActorFields } createdAt mergeCommit: commit { abbreviatedOid } }
                   ... on ClosedEvent { id actor { ...ActorFields } createdAt }
@@ -67,13 +67,13 @@ enum GraphQLQueries {
         query IssueDetail($owner: String!, $name: String!, $number: Int!) {
           repository(owner: $owner, name: $name) {
             issue(number: $number) {
-              id title state url body createdAt
+              id title state url body bodyHTML bodyText createdAt
               author { ...ActorFields }
               timelineItems(last: 60, itemTypes: [ISSUE_COMMENT, CLOSED_EVENT, REOPENED_EVENT, ASSIGNED_EVENT]) {
                 pageInfo { hasPreviousPage }
                 nodes {
                   __typename
-                  ... on IssueComment { id author { ...ActorFields } body createdAt url }
+                  ... on IssueComment { id author { ...ActorFields } body bodyHTML bodyText createdAt url }
                   ... on ClosedEvent { id actor { ...ActorFields } createdAt }
                   ... on ReopenedEvent { id actor { ...ActorFields } createdAt }
                   ... on AssignedEvent {
@@ -131,6 +131,8 @@ struct GQLReviewComment: Decodable {
     let databaseId: Int?
     let author: GQLActor?
     let body: String
+    let bodyHTML: String?
+    let bodyText: String?
     let createdAt: Date
     let path: String
     let diffHunk: String
@@ -141,7 +143,8 @@ struct GQLReviewComment: Decodable {
 
     var reviewComment: ReviewComment {
         ReviewComment(
-            id: id, databaseID: databaseId ?? 0, author: author?.actor ?? .ghost, body: body, createdAt: createdAt,
+            id: id, databaseID: databaseId ?? 0, author: author?.actor ?? .ghost,
+            body: RichBody(markdown: body, html: bodyHTML, plain: bodyText), createdAt: createdAt,
             path: path, diffHunk: diffHunk, line: line ?? originalLine, replyToID: replyTo?.id,
             url: url.flatMap(URL.init(string:))
         )
@@ -178,6 +181,8 @@ struct GQLTimelineNode: Decodable {
     let author: GQLActor?
     let actor: GQLActor?
     let body: String?
+    let bodyHTML: String?
+    let bodyText: String?
     let state: String?
     let createdAt: Date?
     let url: String?
@@ -188,9 +193,12 @@ struct GQLTimelineNode: Decodable {
     let assignee: GQLLoginRef?
 
     enum CodingKeys: String, CodingKey {
-        case typename = "__typename", id, author, actor, body, state, createdAt, url, comments, commit, mergeCommit
+        case typename = "__typename", id, author, actor, body, bodyHTML, bodyText, state, createdAt, url, comments, commit
+        case mergeCommit
         case requestedReviewer, assignee
     }
+
+    var richBody: RichBody { RichBody(markdown: body ?? "", html: bodyHTML, plain: bodyText) }
 }
 
 struct GQLTimeline: Decodable {
@@ -244,10 +252,14 @@ struct GQLPullRequest: Decodable {
     let merged: Bool
     let url: String
     let body: String
+    let bodyHTML: String?
+    let bodyText: String?
     let createdAt: Date
     let author: GQLActor?
     let timelineItems: GQLTimeline
     let commits: GQLNodes<GQLLastCommit>
+
+    var richBody: RichBody { RichBody(markdown: body, html: bodyHTML, plain: bodyText) }
 }
 
 struct GQLIssue: Decodable {
@@ -256,9 +268,13 @@ struct GQLIssue: Decodable {
     let state: String
     let url: String
     let body: String
+    let bodyHTML: String?
+    let bodyText: String?
     let createdAt: Date
     let author: GQLActor?
     let timelineItems: GQLTimeline
+
+    var richBody: RichBody { RichBody(markdown: body, html: bodyHTML, plain: bodyText) }
 }
 
 struct GQLPullRequestData: Decodable {
@@ -279,7 +295,7 @@ enum TimelineMapper {
         let url = URL(string: pr.url)
         var items: [TimelineItem] = []
         if !pr.timelineItems.pageInfo.hasPreviousPage {
-            items.append(opened(id: pr.id, author: author, body: pr.body, createdAt: pr.createdAt, url: url))
+            items.append(opened(id: pr.id, author: author, body: pr.richBody, createdAt: pr.createdAt, url: url))
         }
         for node in pr.timelineItems.nodes.compactMap({ $0 }) {
             append(node, to: &items)
@@ -319,7 +335,7 @@ enum TimelineMapper {
         let url = URL(string: issue.url)
         var items: [TimelineItem] = []
         if !issue.timelineItems.pageInfo.hasPreviousPage {
-            items.append(opened(id: issue.id, author: author, body: issue.body, createdAt: issue.createdAt, url: url))
+            items.append(opened(id: issue.id, author: author, body: issue.richBody, createdAt: issue.createdAt, url: url))
         }
         for node in issue.timelineItems.nodes.compactMap({ $0 }) {
             append(node, to: &items)
@@ -331,11 +347,8 @@ enum TimelineMapper {
         )
     }
 
-    private static func opened(id: String, author: Actor, body: String, createdAt: Date, url: URL?) -> TimelineItem {
-        TimelineItem(
-            id: "opened-\(id)", actor: author, createdAt: createdAt,
-            payload: .event(.opened, detail: body.isEmpty ? nil : body), url: url
-        )
+    private static func opened(id: String, author: Actor, body: RichBody, createdAt: Date, url: URL?) -> TimelineItem {
+        TimelineItem(id: "opened-\(id)", actor: author, createdAt: createdAt, payload: .opened(body: body), url: url)
     }
 
     private static func append(_ node: GQLTimelineNode, to items: inout [TimelineItem]) {
@@ -352,7 +365,7 @@ enum TimelineMapper {
         case "IssueComment":
             guard let id = node.id, let createdAt = node.createdAt else { return }
             items.append(TimelineItem(
-                id: id, actor: node.author?.actor ?? .ghost, createdAt: createdAt, payload: .comment(body: node.body ?? ""),
+                id: id, actor: node.author?.actor ?? .ghost, createdAt: createdAt, payload: .comment(body: node.richBody),
                 url: url
             ))
         case "PullRequestReview":
@@ -360,7 +373,7 @@ enum TimelineMapper {
             let comments = node.comments?.items.map(\.reviewComment) ?? []
             items.append(TimelineItem(
                 id: id, actor: node.author?.actor ?? .ghost, createdAt: createdAt,
-                payload: .review(state: reviewState(node.state), body: node.body ?? "", comments: comments), url: url
+                payload: .review(state: reviewState(node.state), body: node.richBody, comments: comments), url: url
             ))
         case "PullRequestCommit":
             guard let id = node.id, let commit = node.commit else { return }

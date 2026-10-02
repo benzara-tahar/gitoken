@@ -25,6 +25,7 @@ final class NotchModel {
     }
 
     let store: InboxStore
+    let sounds = SoundPlayer()
 
     private(set) var route: Route = .collapsed
     var host: HostScreen = .fallback
