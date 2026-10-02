@@ -1,4 +1,14 @@
-# Gitoken
+<p align="center">
+  <img src="docs/assets/logo.svg" width="128" height="128" alt="Gitoken logo">
+</p>
+
+<h1 align="center">Gitoken</h1>
+
+<p align="center">GitHub notifications that live in your MacBook's notch.</p>
+
+<p align="center">
+  <img src="docs/assets/header.png" alt="Gitoken on a MacBook: the inbox hangs from the notch, with an arrival banner and a pull request conversation magnified beside it. Demo data.">
+</p>
 
 Gitoken is a macOS menu-bar agent that shows your GitHub notifications around the MacBook notch.
 
