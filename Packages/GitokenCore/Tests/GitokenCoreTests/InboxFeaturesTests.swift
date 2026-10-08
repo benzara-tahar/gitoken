@@ -111,6 +111,227 @@ private let afternoonQuiet = QuietHours(enabled: true, start: .init(hour: 13, mi
 }
 
 @MainActor
+@Suite struct NotificationTypeTests {
+    @Test(arguments: NotificationReason.allCases)
+    func reasonAllowlistAndMuteRulesAreIndependentPresentationGates(_ reason: NotificationReason) {
+        let thread = makeThread("1", updatedAt: t0, reason: reason)
+        var settings = AppSettings()
+        #expect(settings.presents(thread))
+        settings.enabledNotificationReasons.remove(reason)
+        #expect(!settings.presents(thread))
+        settings.enabledNotificationReasons.insert(reason)
+        settings.muteRules = [.repository(repo.fullName)]
+        #expect(!settings.presents(thread))
+        settings.muteRules = []
+        #expect(settings.presents(thread))
+    }
+
+    @Test func excludedActivityStaysTrackedAcrossPollsAndRelaunchWithoutGitHubWrites() async throws {
+        let h = try Harness()
+        let id = ThreadID("1")
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        h.github.add("1", at: t0 - 600, reason: .mention, items: [comment("c0", by: sarah, at: t0 - 600)])
+        await h.store.refresh()
+        #expect(h.store.groups.isEmpty)
+        #expect(h.store.unseenCount == 0)
+        #expect(h.store.pendingCount == 0)
+        #expect(h.github.update { $0.detailCalls }.isEmpty)
+
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: lea, at: h.now))
+        await h.store.refresh()
+        #expect(h.store.arrival == nil)
+        let tracked = try #require(try h.database.threads(for: AccountKey(login: me.login)).first)
+        #expect(tracked.thread.unread)
+        #expect(tracked.thread.updatedAt == h.now)
+        #expect(tracked.doneAt == nil)
+        #expect(tracked.needsHydration)
+        #expect(h.github.update { $0.markReadCalls }.isEmpty)
+        #expect(h.github.update { $0.markDoneCalls }.isEmpty)
+
+        let relaunched = h.relaunched()
+        #expect(relaunched.groups.isEmpty)
+        relaunched.updateSettings { $0.enabledNotificationReasons.insert(.mention) }
+        #expect(relaunched.groups.map(\.id) == [id])
+        #expect(relaunched.unseenCount == 1)
+        #expect(relaunched.arrival == nil, "re-enabling does not replay excluded arrivals")
+        await relaunched.refresh()
+        #expect(relaunched.groups.first?.preview?.actor == lea)
+        #expect(h.github.update { $0.detailCalls } == [id])
+        #expect(relaunched.arrival == nil)
+    }
+
+    @Test func disablingTypesImmediatelyPrunesCurrentAndQueuedArrivals() async throws {
+        let h = try Harness()
+        h.github.add("1", at: t0 - 600, reason: .mention)
+        h.github.add("2", at: t0 - 600, reason: .mention)
+        h.github.add("3", at: t0 - 600)
+        await h.store.refresh()
+        h.clock.advance(by: 60)
+        for id in ["1", "2", "3"] {
+            h.github.activity(on: id, comment("c\(id)", by: sarah, at: h.now))
+        }
+        await h.store.refresh()
+        #expect(h.store.arrival?.groupID == ThreadID("1"))
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        #expect(h.store.arrival?.groupID == ThreadID("3"))
+        #expect(h.store.groups.map(\.id) == [ThreadID("3")])
+        h.store.dismissArrival()
+        #expect(h.store.arrival == nil)
+        h.store.updateSettings { $0.enabledNotificationReasons.insert(.mention) }
+        #expect(h.store.unseenCount == 3)
+        #expect(h.store.arrival == nil)
+    }
+
+    @Test func filteringQuietActivityPrunesCountsAndActorsAcrossRelaunch() async throws {
+        let h = try Harness()
+        h.store.setManualQuiet(true)
+        h.github.add("1", at: t0 - 600, reason: .mention)
+        h.github.add("2", at: t0 - 600)
+        await h.store.refresh()
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: sarah, at: h.now))
+        h.github.activity(on: "2", comment("c2", by: omar, at: h.now))
+        await h.store.refresh()
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        let relaunched = h.relaunched()
+        relaunched.setManualQuiet(false)
+        guard case .summary(let updates, let groups, let actors, _)? = relaunched.arrival?.kind else {
+            Issue.record("expected the retained group's summary")
+            return
+        }
+        #expect(updates == 1)
+        #expect(groups == 1)
+        #expect(actors == [omar])
+    }
+
+    @Test func filteringOvernightActivityPrunesMorningSummary() async throws {
+        let h = try Harness()
+        h.store.updateSettings { $0.quietHours = afternoonQuiet }
+        h.github.add("1", at: t0 - 600, reason: .mention, repo: api)
+        h.github.add("2", at: t0 - 600)
+        await h.store.refresh()
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: sarah, at: h.now))
+        h.github.activity(on: "2", comment("c2", by: omar, at: h.now))
+        await h.store.refresh()
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        h.advance(minutes: 59)
+        guard case .morningSummary(let summary)? = h.store.arrival?.kind else {
+            Issue.record("expected the retained group's morning summary")
+            return
+        }
+        #expect(summary.updates == 1)
+        #expect(summary.conversations == 1)
+        #expect(summary.topRepos == [.init(repo: repo, updates: 1)])
+        #expect(summary.actors == [omar])
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.reviewRequested) }
+        #expect(h.store.arrival == nil, "an already published summary is pruned too")
+    }
+
+    @Test func snoozeExpiryAndAIReanalysisDoNotBypassTheReasonFilter() async throws {
+        let h = try Harness()
+        let ai = Actor(login: "copilot-pull-request-reviewer", isBot: true)
+        h.github.add("1", at: t0 - 600, reason: .mention, items: [
+            comment("c0", by: sarah, at: t0 - 600),
+            review("ai", by: ai, at: t0 - 300, .commented),
+        ])
+        await h.store.refresh()
+        h.store.snooze(ThreadID("1"), .thirtyMinutes)
+        h.store.updateSettings {
+            $0.enabledNotificationReasons.remove(.mention)
+            $0.notifyAIReviews = true
+        }
+        h.advance(minutes: 31)
+        #expect(h.store.groups.isEmpty)
+        #expect(h.store.arrival == nil)
+        h.store.updateSettings { $0.enabledNotificationReasons.insert(.mention) }
+        #expect(h.group("1")?.preview?.actor == ai)
+        #expect(h.bucket("1") == .new)
+        #expect(h.group("1")?.resurfaced == .snoozeEnded)
+        #expect(h.store.arrival == nil)
+    }
+
+    @Test func pollingAppliesAChangedReasonWithoutDiscardingTheTrackedThread() async throws {
+        let h = try Harness()
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        h.github.add("1", at: t0 - 600)
+        await h.store.refresh()
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: sarah, at: h.now))
+        await h.store.refresh()
+        #expect(h.store.arrival != nil)
+        h.github.add("1", at: h.now, reason: .mention)
+        await h.store.refresh()
+        #expect(h.store.groups.isEmpty)
+        #expect(h.store.arrival == nil)
+        h.github.add("1", at: h.now, reason: .reviewRequested)
+        await h.store.refresh()
+        #expect(h.store.unseenCount == 1)
+        #expect(h.store.arrival == nil)
+        #expect(try h.database.threads(for: AccountKey(login: me.login)).count == 1)
+    }
+}
+
+@MainActor
+@Suite struct NotificationSummaryFilterTests {
+    @Test func publishedSummarySurvivesUnrelatedExclusionsButDropsWhenItsTypeIsExcluded() async throws {
+        let h = try Harness()
+        h.github.add("1", at: t0 - 600, reason: .mention)
+        h.github.add("2", at: t0 - 600)
+        await h.store.refresh()
+        h.store.setManualQuiet(true)
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: sarah, at: h.now))
+        await h.store.refresh()
+        h.store.setManualQuiet(false)
+        let summary = try #require(h.store.arrival)
+
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.reviewRequested) }
+        #expect(h.store.arrival == summary, "an unrelated hidden thread must not discard the summary")
+        h.clock.advance(by: 60)
+        h.github.activity(on: "2", comment("c2", by: omar, at: h.now))
+        await h.store.refresh()
+        #expect(h.store.arrival == summary, "subsequent polling preserves unrelated summaries")
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        #expect(h.store.arrival == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func publishedMixedSummaryRetainsAllowedActivityWithoutReplayingTheAnnouncement(_ morning: Bool) async throws {
+        let h = try Harness()
+        if morning {
+            h.store.updateSettings { $0.quietHours = afternoonQuiet }
+        } else {
+            h.store.setManualQuiet(true)
+        }
+        h.github.add("1", at: t0 - 600, reason: .mention, repo: api)
+        h.github.add("2", at: t0 - 600)
+        await h.store.refresh()
+        h.clock.advance(by: 60)
+        h.github.activity(on: "1", comment("c1", by: sarah, at: h.now))
+        h.github.activity(on: "2", comment("c2", by: omar, at: h.now))
+        await h.store.refresh()
+        if morning {
+            h.advance(minutes: 59)
+        } else {
+            h.store.setManualQuiet(false)
+        }
+        let before = try #require(h.store.arrival)
+        h.store.updateSettings { $0.enabledNotificationReasons.remove(.mention) }
+        let retained = try #require(h.store.arrival)
+        #expect(retained.id == before.id)
+        #expect(retained.actors == [omar])
+        if morning {
+            #expect(retained.kind == .morningSummary(MorningSummary(
+                updates: 1, conversations: 1, topRepos: [.init(repo: repo, updates: 1)], actors: [omar])))
+        } else {
+            #expect(retained.kind == .summary(updates: 1, groups: 1, actors: [omar], endedReason: .manual))
+        }
+    }
+}
+
+@MainActor
 @Suite struct MorningSummaryTests {
     /// Quiet 13:00–15:00 with activity on five conversations in four repositories, collected at 14:01.
     private func collectAcrossRepos() async throws -> Harness {
@@ -138,17 +359,11 @@ private let afternoonQuiet = QuietHours(enabled: true, start: .init(hour: 13, mi
         return h
     }
 
-    @Test func groupsOvernightActivityByRepoAndAddsShelfChangesOnce() async throws {
+    @Test func groupsOvernightActivityByRepoAndPublishesOnce() async throws {
         let h = try await collectAcrossRepos()
-        var shelfCalls = 0
-        h.store.overnightShelfLines = {
-            shelfCalls += 1
-            return ["#142 is ready to merge", "CI failed on #305"]
-        }
 
         h.advance(minutes: 58)
         #expect(h.store.arrival == nil)
-        #expect(shelfCalls == 0)
         h.advance(minutes: 1)
         guard case .morningSummary(let summary)? = h.store.arrival?.kind else {
             Issue.record("expected a morning summary, got \(String(describing: h.store.arrival))")
@@ -159,17 +374,14 @@ private let afternoonQuiet = QuietHours(enabled: true, start: .init(hour: 13, mi
         #expect(summary.topRepos == [
             .init(repo: repo, updates: 4), .init(repo: api, updates: 3), .init(repo: docs, updates: 1),
         ], "busiest first, ties by name, at most three")
-        #expect(summary.shelfChanges == ["#142 is ready to merge", "CI failed on #305"])
 
         h.store.dismissArrival()
         h.advance(minutes: 5)
         #expect(h.store.arrival == nil)
-        #expect(shelfCalls == 1)
     }
 
     @Test func lockedWhenQuietHoursEndDefersToFirstUnlock() async throws {
         let h = try await collectAcrossRepos()
-        h.store.overnightShelfLines = { ["#142 is ready to merge"] }
         h.advance(minutes: 30)
         h.store.pause()
         h.advance(minutes: 40)
@@ -184,7 +396,6 @@ private let afternoonQuiet = QuietHours(enabled: true, start: .init(hour: 13, mi
             return
         }
         #expect(summary.updates == 9)
-        #expect(summary.shelfChanges == ["#142 is ready to merge"])
 
         h.store.dismissArrival()
         h.store.pause()
@@ -192,39 +403,26 @@ private let afternoonQuiet = QuietHours(enabled: true, start: .init(hour: 13, mi
         #expect(h.store.arrival == nil, "only the first unlock after quiet hours shows it")
     }
 
-    @Test func shelfChangesAloneStillMakeAMorningCard() async throws {
-        let h = try Harness()
-        h.store.updateSettings { $0.quietHours = afternoonQuiet }
-        h.github.add("1", at: t0 - 600)
-        await h.store.refresh()
-        h.store.overnightShelfLines = { ["CI failed on #305"] }
-        h.advance(minutes: 60)
-        #expect(h.store.arrival?.kind == .morningSummary(MorningSummary(
-            updates: 0, conversations: 0, topRepos: [], shelfChanges: ["CI failed on #305"], actors: [])))
-    }
 
     @Test func quietNightWithNothingToReportShowsNothing() async throws {
         let h = try Harness()
         h.store.updateSettings { $0.quietHours = afternoonQuiet }
-        h.store.overnightShelfLines = { [] }
         h.advance(minutes: 60)
         #expect(h.store.quietReason == nil)
         #expect(h.store.arrival == nil)
     }
 
-    @Test func relaunchAfterQuietHoursPublishesOnFirstTickWithShelfChanges() async throws {
+    @Test func relaunchAfterQuietHoursPublishesOnFirstTick() async throws {
         let h = try await collectAcrossRepos()
         h.clock.advance(by: 3600)
         let relaunched = h.relaunched()
-        #expect(relaunched.arrival == nil, "waits until the shelf is wired and the store runs")
-        relaunched.overnightShelfLines = { ["#142 is ready to merge"] }
+        #expect(relaunched.arrival == nil, "waits until the store runs while the Mac is in use")
         relaunched.tick()
         guard case .morningSummary(let summary)? = relaunched.arrival?.kind else {
             Issue.record("expected a morning summary, got \(String(describing: relaunched.arrival))")
             return
         }
         #expect(summary.topRepos.first == .init(repo: repo, updates: 4), "per-conversation counts survive the relaunch")
-        #expect(summary.shelfChanges == ["#142 is ready to merge"])
     }
 }
 

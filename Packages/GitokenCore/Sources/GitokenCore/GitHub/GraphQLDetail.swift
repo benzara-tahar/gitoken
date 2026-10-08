@@ -1,15 +1,15 @@
 import Foundation
 
 enum GraphQLQueries {
-    private static let actorFragment = """
+    static let actorFragment = """
         fragment ActorFields on Actor { __typename login avatarUrl ... on User { name } }
         """
 
-    private static let reviewCommentFields = """
-        id databaseId author { ...ActorFields } body bodyHTML bodyText createdAt path diffHunk line originalLine replyTo { id } url \(reactionFields)
+    static let reviewCommentFields = """
+        id databaseId author { ...ActorFields } body bodyHTML bodyText createdAt path diffHunk line originalLine replyTo { id } url state \(reactionFields)
         """
 
-    private static let reactionFields = "reactionGroups { content viewerHasReacted reactors { totalCount } }"
+    static let reactionFields = "reactionGroups { content viewerHasReacted reactors { totalCount } }"
 
     static let pullRequest = """
         query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
@@ -162,13 +162,16 @@ struct GQLReviewComment: Decodable {
     let replyTo: GQLNodeRef?
     let url: String?
     let reactionGroups: [GQLReactionGroup]?
+    /// `PENDING` or `SUBMITTED`.
+    let state: String?
 
     var reviewComment: ReviewComment {
         ReviewComment(
             id: id, databaseID: databaseId ?? 0, author: author?.actor ?? .ghost,
             body: RichBody(markdown: body, html: bodyHTML, plain: bodyText), createdAt: createdAt,
             path: path, diffHunk: diffHunk, line: line ?? originalLine, replyToID: replyTo?.id,
-            url: url.flatMap(URL.init(string:)), reactions: GQLReactionGroup.counts(reactionGroups)
+            url: url.flatMap(URL.init(string:)), reactions: GQLReactionGroup.counts(reactionGroups),
+            isPending: state == "PENDING"
         )
     }
 }
@@ -336,7 +339,30 @@ struct GQLIssueData: Decodable {
 // MARK: - Mapping to domain
 
 enum TimelineMapper {
-    static func detail(threadID: ThreadID, pullRequest pr: GQLPullRequest, fetchedAt: Date) -> ThreadDetail {
+    struct SubjectDetail {
+        let title: String
+        let state: SubjectState
+        let author: Actor?
+        let htmlURL: URL
+        let items: [TimelineItem]
+        let checks: CheckSummary?
+
+        func thread(id: ThreadID, fetchedAt: Date) -> ThreadDetail {
+            ThreadDetail(threadID: id, title: title, state: state, author: author, htmlURL: htmlURL,
+                         items: items, checks: checks, fetchedAt: fetchedAt)
+        }
+
+        func search(id: SearchItemID, fetchedAt: Date) -> SearchSubjectDetail {
+            SearchSubjectDetail(id: id, title: title, state: state, author: author, htmlURL: htmlURL,
+                                items: items, checks: checks, fetchedAt: fetchedAt)
+        }
+    }
+
+    static func detail(threadID: ThreadID, pullRequest: GQLPullRequest, fetchedAt: Date) -> ThreadDetail {
+        subject(pullRequest: pullRequest).thread(id: threadID, fetchedAt: fetchedAt)
+    }
+
+    static func subject(pullRequest pr: GQLPullRequest) -> SubjectDetail {
         let author = pr.author?.actor ?? .ghost
         let url = URL(string: pr.url)
         var items: [TimelineItem] = []
@@ -372,13 +398,17 @@ enum TimelineMapper {
         } else {
             state = pr.isDraft ? .draft : .open
         }
-        return ThreadDetail(
-            threadID: threadID, title: pr.title, state: state, author: pr.author?.actor,
-            htmlURL: url ?? URL(string: "https://github.com")!, items: items, checks: checks, fetchedAt: fetchedAt
+        return SubjectDetail(
+            title: pr.title, state: state, author: pr.author?.actor,
+            htmlURL: url ?? URL(string: "https://github.com")!, items: items, checks: checks
         )
     }
 
     static func detail(threadID: ThreadID, issue: GQLIssue, fetchedAt: Date) -> ThreadDetail {
+        subject(issue: issue).thread(id: threadID, fetchedAt: fetchedAt)
+    }
+
+    static func subject(issue: GQLIssue) -> SubjectDetail {
         let author = issue.author?.actor ?? .ghost
         let url = URL(string: issue.url)
         var items: [TimelineItem] = []
@@ -390,10 +420,9 @@ enum TimelineMapper {
         for node in issue.timelineItems.nodes.compactMap({ $0 }) {
             append(node, to: &items)
         }
-        return ThreadDetail(
-            threadID: threadID, title: issue.title, state: issue.state == "CLOSED" ? .closed : .open,
-            author: issue.author?.actor, htmlURL: url ?? URL(string: "https://github.com")!, items: items, checks: nil,
-            fetchedAt: fetchedAt
+        return SubjectDetail(
+            title: issue.title, state: issue.state == "CLOSED" ? .closed : .open,
+            author: issue.author?.actor, htmlURL: url ?? URL(string: "https://github.com")!, items: items, checks: nil
         )
     }
 

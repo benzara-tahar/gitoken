@@ -18,6 +18,8 @@ final class NotchController {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var soundPolicy = SoundPolicy()
     private var hotKey: GlobalHotKey?
+    private var focusedRoute: NotchModel.Route = .collapsed
+    private var startupAuthHandled = false
 
     init(store: InboxStore) {
         model = NotchModel(store: store)
@@ -44,7 +46,11 @@ final class NotchController {
         hotKey = GlobalHotKey(model: model) { [model] in model.toggleFromHotKey() }
         panel.orderFrontRegardless()
         updateFullscreen()
+        observeStartupAuth()
     }
+
+    /// The notch panel, for windows placed beside it (file preview).
+    var window: NSWindow { panel }
 
     // MARK: Frame
 
@@ -126,6 +132,7 @@ final class NotchController {
     private func observeRoute() {
         withObservationTracking {
             _ = model.route
+            _ = model.panelFocusToken
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.routeChanged()
@@ -137,13 +144,45 @@ final class NotchController {
     private func routeChanged() {
         let open = model.route.isOpen
         panel.allowsKey = open
+        if model.route != focusedRoute {
+            panel.makeFirstResponder(nil)
+            focusedRoute = model.route
+        }
         if open {
-            if !panel.isKeyWindow { panel.makeKey() }
+            if !panel.isKeyWindow, model.previewController?.hasKeyWindow != true { panel.makeKey() }
         } else if panel.isKeyWindow {
             // Hand keyboard focus back to whatever app the user was typing in.
             panel.resignKey()
             panel.orderOut(nil)
             if !model.hiddenForFullscreen { panel.orderFrontRegardless() }
+        }
+    }
+
+    // MARK: Startup auth guidance
+
+    private func observeStartupAuth() {
+        guard !startupAuthHandled else { return }
+        let store = model.store
+        switch store.phase {
+        case .starting:
+            break
+        case .blocked:
+            if !model.hiddenForFullscreen {
+                startupAuthHandled = true
+                if model.route == .collapsed { model.open(.list) }
+            }
+        case .ready:
+            // A cached viewer, or /user succeeding before /notifications fails, is not a settled startup.
+            startupAuthHandled = store.lastSyncAt != nil || store.lastSyncError != nil
+        }
+        guard !startupAuthHandled else { return }
+        withObservationTracking {
+            _ = store.phase
+            _ = store.lastSyncAt
+            _ = store.lastSyncError
+            _ = model.hiddenForFullscreen
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeStartupAuth() }
         }
     }
 
@@ -182,13 +221,17 @@ final class NotchController {
             monitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            self?.handleKey(event) ?? event
+            guard let self else { return event }
+            return self.handleKey(event)
         }) {
             monitors.append(local)
         }
     }
 
     private func outsideClick() {
+        let point = NSEvent.mouseLocation
+        guard !(panel.isVisible && panel.frame.contains(point)),
+              model.previewController?.containsVisibleWindow(at: point) != true else { return }
         if model.menu != nil { model.dismissMenu() }
         guard model.route.isOpen, !model.pinned else { return }
         model.close()
@@ -211,7 +254,19 @@ final class NotchController {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if model.isRecordingHotKey { return recordHotKey(event) }
         if event.keyCode == Key.escape {
-            if model.menu != nil { model.dismissMenu() } else { model.close() }
+            // Esc cancels IME composition in the focused text view first.
+            if (panel.firstResponder as? NSTextView)?.hasMarkedText() == true { return event }
+            if model.menu != nil {
+                model.dismissMenu()
+            } else if model.route == .list, !model.searchText.isEmpty {
+                model.searchText = ""
+            } else if model.isPreviewOpen {
+                model.closePreview()
+            } else if model.route == .list {
+                model.close()
+            } else {
+                model.back()
+            }
             return nil
         }
         if model.menu != nil {
@@ -223,6 +278,9 @@ final class NotchController {
             }
             return nil
         }
+        if model.route == .list, model.searchFocused, let field = panel.firstResponder as? NSTextView {
+            return handleSearchFieldKey(event, field: field, flags: flags) ? nil : event
+        }
         if panel.firstResponder is NSTextView { return event }
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let backShortcut = (flags == .command && chars == "[") || (flags.isEmpty && event.keyCode == Key.left)
@@ -232,8 +290,17 @@ final class NotchController {
         case .conversation(let id):
             if backShortcut { model.back(); return nil }
             if flags.isEmpty, chars == "r" { model.requestComposerFocus(); return nil }
+            if flags.isEmpty, chars == " " { model.togglePreview(); return nil }
             if flags.isEmpty, chars == "d" || chars == "e" {
                 if model.group(id)?.doneAt != nil { model.undoDone(id) } else { model.markDone(id) }
+                return nil
+            }
+            if flags.isEmpty, chars == "u", model.toast?.undo != nil { model.performToastUndo(); return nil }
+            return event
+        case .searchConversation(let id):
+            if backShortcut { model.back(); return nil }
+            if flags.isEmpty, chars == "d" || chars == "e", let item = model.searchItem(id) {
+                model.dismissSearch(item)
                 return nil
             }
             if flags.isEmpty, chars == "u", model.toast?.undo != nil { model.performToastUndo(); return nil }
@@ -266,23 +333,38 @@ final class NotchController {
         return nil
     }
 
+    /// While the search field has focus: Down / Return move focus to the first result (IME composition excepted).
+    private func handleSearchFieldKey(_ event: NSEvent, field: NSTextView, flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags.subtracting(.numericPad).subtracting(.function).isEmpty, !field.hasMarkedText(),
+              [Key.down, Key.returnKey, Key.enter].contains(event.keyCode) else { return false }
+        guard let first = model.keyboardRows.first else { return true }
+        model.selectListRow(first)
+        panel.makeFirstResponder(nil)
+        return true
+    }
+
     private func handleListKey(_ event: NSEvent, chars: String, flags: NSEvent.ModifierFlags) -> Bool {
+        // `/` focuses the search field (layouts may need Shift for it).
+        if chars == "/", flags.isDisjoint(with: [.command, .control, .option]) {
+            model.requestSearchFocus()
+            return true
+        }
         guard flags.subtracting(.numericPad).subtracting(.function).isEmpty else { return false }
         let store = model.store
-        let rows = Buckets(store: store, now: store.now.now()).visible(showSnoozed: model.showSnoozed, showDone: model.showDone)
-        let index = model.selectedRow.flatMap { id in rows.firstIndex { $0.id == id } }
+        let rows = model.keyboardRows
+        let index = model.listSelection.flatMap { rows.firstIndex(of: $0) }
         if event.keyCode == Key.down || chars == "j" {
             guard !rows.isEmpty else { return true }
-            model.selectedRow = rows[min(rows.count - 1, (index ?? -1) + 1)].id
+            model.selectListRow(rows[min(rows.count - 1, (index ?? -1) + 1)])
             return true
         }
         if event.keyCode == Key.up || chars == "k" {
             guard !rows.isEmpty else { return true }
-            model.selectedRow = rows[max(0, (index ?? rows.count) - 1)].id
+            model.selectListRow(rows[max(0, (index ?? rows.count) - 1)])
             return true
         }
         if event.keyCode == Key.returnKey || event.keyCode == Key.enter {
-            if let index { model.open(.conversation(rows[index].id)) }
+            model.activateListSelection()
             return true
         }
         // U undoes the last action (done, snooze, mute) while its toast is up, else unsnoozes / restores the row.
@@ -290,14 +372,27 @@ final class NotchController {
             model.performToastUndo()
             return true
         }
+        // Space toggles the file preview, which follows the selection while it is open.
+        if chars == " " {
+            if model.selectedSearchRow != nil { return false }
+            if index != nil || model.isPreviewOpen { model.togglePreview() }
+            return true
+        }
         guard let index else { return false }
-        let group = rows[index]
+        if case .search(let row) = rows[index] {
+            guard let item = model.searchItem(row.itemID) else { return false }
+            switch chars {
+            case "e", "d": model.dismissSearch(item); return true
+            default: return false
+            }
+        }
+        guard case .notification(let id) = rows[index], let group = model.group(id) else { return false }
         let bucket = group.bucket(at: store.now.now())
         switch chars {
         case "e", "d":
-            let next = rows.indices.contains(index + 1) ? rows[index + 1].id : (index > 0 ? rows[index - 1].id : nil)
+            let next = rows.indices.contains(index + 1) ? rows[index + 1] : (index > 0 ? rows[index - 1] : nil)
             if bucket == .done { model.undoDone(group.id) } else { model.markDone(group.id) }
-            model.selectedRow = next
+            model.selectListRow(next)
             return true
         case "s":
             if bucket == .new || bucket == .pending { model.presentSnoozeMenu(for: group.id) }

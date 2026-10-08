@@ -1,47 +1,5 @@
 import Foundation
 
-/// Editor used by "Open in editor". Known apps launch via `open -a`, so no shell PATH is needed.
-public enum EditorChoice: Hashable, Codable, Sendable {
-    case vscode
-    case zed
-    /// Run through the user's login shell; `{path}` is replaced with the shell-quoted folder path.
-    case custom(template: String)
-}
-
-/// Where the PR Shelf circle rests; it snaps to the nearest corner after a drag.
-public enum ShelfCorner: String, Codable, Sendable, CaseIterable {
-    case bottomLeft, bottomRight, topLeft, topRight
-}
-
-/// Changes on a shelved PR that can bounce the circle and play a sound.
-public enum ShelfEventKind: String, Codable, Sendable, CaseIterable {
-    case ciFailed, ciPassed, approved, changesRequested, newComment, readyToMerge, mergeConflict, merged
-}
-
-public struct ShelfSettings: Hashable, Codable, Sendable {
-    public var enabled: Bool
-    public var corner: ShelfCorner
-    public var events: Set<ShelfEventKind>
-
-    public static let defaultEvents: Set<ShelfEventKind> = [.ciFailed, .ciPassed, .approved, .changesRequested, .newComment, .readyToMerge]
-
-    public init(enabled: Bool = true, corner: ShelfCorner = .bottomLeft, events: Set<ShelfEventKind> = ShelfSettings.defaultEvents) {
-        self.enabled = enabled
-        self.corner = corner
-        self.events = events
-    }
-
-    private enum CodingKeys: String, CodingKey { case enabled, corner, events }
-
-    public init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let d = ShelfSettings()
-        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
-        corner = try c.decodeIfPresent(ShelfCorner.self, forKey: .corner) ?? d.corner
-        events = try c.decodeIfPresent(Set<ShelfEventKind>.self, forKey: .events) ?? d.events
-    }
-}
-
 /// Global shortcut. `keyCode` is the macOS virtual key code (kVK_*), modifiers are Gitoken's own flags.
 public struct HotKey: Hashable, Codable, Sendable {
     public struct Modifiers: OptionSet, Hashable, Codable, Sendable {

@@ -6,6 +6,7 @@ enum SurfaceContent: Equatable {
     case banner(Arrival)
     case list
     case conversation(ThreadID)
+    case searchConversation(SearchItemID)
     case settings
 
     /// Identity for cross-fades: merged arrivals keep the same key so the banner updates in place.
@@ -14,6 +15,7 @@ enum SurfaceContent: Equatable {
         case .banner(let a): "banner-\(a.id)"
         case .list: "list"
         case .conversation(let id): "convo-\(id.rawValue)"
+        case .searchConversation(let id): "search-convo-\(id.rawValue)"
         case .settings: "settings"
         }
     }
@@ -30,6 +32,7 @@ extension NotchModel {
         case .collapsed: visibleArrival.map(SurfaceContent.banner)
         case .list: .list
         case .conversation(let id): .conversation(id)
+        case .searchConversation(let id): .searchConversation(id)
         case .settings: .settings
         }
     }
@@ -42,13 +45,14 @@ extension NotchModel {
         case .banner: width = fluid ? 424 : 376
         case .list, .settings: width = fluid ? 408 : 392
         case .conversation(let id): width = hasExpandedDiff(id) ? 720 : (fluid ? 436 : 420)
+        case .searchConversation: width = fluid ? 436 : 420
         }
         return min(width, host.maxSurfaceWidth)
     }
 
     func surfaceMaxHeight(_ content: SurfaceContent) -> CGFloat {
         switch content {
-        case .conversation: host.maxSurfaceHeight
+        case .conversation, .searchConversation: host.maxSurfaceHeight
         case .settings: min(860, host.maxSurfaceHeight)
         default: min(640, host.maxSurfaceHeight)
         }
@@ -92,6 +96,7 @@ struct RootView: View {
         .onChange(of: reduceMotion, initial: true) {
             model.systemReduceMotion = reduceMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
+        .onChange(of: model.viewerLogin, initial: true) { model.syncSearchAccount() }
     }
 }
 
@@ -171,6 +176,7 @@ private struct FluidComposition: View {
         .padding(.horizontal, ear)
         .background(island.fill(Color.black))
         .clipShape(island)
+        .overlay { NotchStatusRim(shape: island) }
         .shadow(color: .black.opacity(content == nil ? (attached ? 0 : 0.38) : 0.55), radius: content == nil ? 9 : 28, y: content == nil ? 6 : 14)
         .scaleEffect(hovering && content == nil ? 1.035 : 1, anchor: .top)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: hovering)
@@ -218,11 +224,15 @@ struct SurfaceBody: View {
         case .list:
             switch model.store.phase {
             case .blocked(let error): BlockedView(error: error, width: width)
-            case .starting where model.store.groups.isEmpty: StartingView(width: width)
+            case .starting where model.store.lastSyncError == nil && model.store.groups.isEmpty
+                && model.settings.customSections.allSatisfy({ model.store.customSections.items(in: $0.id).isEmpty }):
+                StartingView(width: width)
             default: InboxListView(width: width, maxHeight: maxHeight)
             }
         case .conversation(let id):
             ConversationView(id: id, width: width, maxHeight: maxHeight)
+        case .searchConversation(let id):
+            SearchConversationView(id: id, width: width, maxHeight: maxHeight)
         case .settings:
             SettingsView(width: width, maxHeight: maxHeight)
         }

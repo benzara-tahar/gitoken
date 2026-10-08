@@ -23,10 +23,12 @@ struct InboxListView: View {
     var body: some View {
         let store = model.store
         let now = store.now.now()
-        let buckets = Buckets(store: store, now: now)
+        let buckets = model.buckets()
+        let viewportHeight = max(60, maxHeight - chromeHeight - footerHeight)
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 header
+                InboxSearchField()
                 summary(buckets)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { chromeHeight = $0 }
@@ -36,10 +38,10 @@ struct InboxListView: View {
                     sections(buckets, now: now)
                         .padding(.horizontal, 8)
                         .padding(.bottom, 8)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                        .onGeometryChange(for: CGFloat.self) { min($0.size.height, viewportHeight) } action: { contentHeight = $0 }
                 }
                 .scrollIndicators(.automatic)
-                .frame(height: max(60, min(contentHeight, maxHeight - chromeHeight - footerHeight)))
+                .frame(height: max(60, min(contentHeight, viewportHeight)))
                 .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top < 24 } action: { _, top in
                     atTop = top
                     if top { pendingUpdate = nil }
@@ -61,6 +63,11 @@ struct InboxListView: View {
                 }
                 .onChange(of: model.selectedRow) { _, id in
                     guard let id else { return }
+                    model.prefetchPreview(for: id)
+                    withAnimation(motion.fade) { proxy.scrollTo(id, anchor: nil) }
+                }
+                .onChange(of: model.selectedSearchRow) { _, id in
+                    guard let id else { return }
                     withAnimation(motion.fade) { proxy.scrollTo(id, anchor: nil) }
                 }
                 .environment(\.listScroll, ListScrollAction { section in
@@ -70,13 +77,33 @@ struct InboxListView: View {
             footer
         }
         .frame(width: width)
+        .task(id: model.settings.customSections.map { "\($0.id):\($0.query)" }.joined(separator: "\n")) {
+            guard !model.settings.customSections.isEmpty else { return }
+            await model.store.customSections.refreshAll()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(300)) } catch { return }
+                await model.store.customSections.refreshAll()
+            }
+        }
     }
 
     private var footerHeight: CGFloat {
         var h: CGFloat = 0
         if model.quietStatus != nil { h += 36 }
-        if model.store.lastSyncError != nil { h += 30 }
+        if model.store.lastSyncError != nil, !showsConnectionEmpty { h += 30 }
         return h
+    }
+
+    private var showsConnectionEmpty: Bool {
+        model.store.lastSyncError != nil && model.store.groups.isEmpty &&
+            !model.settings.customSections.contains {
+                !(model.store.customSections.results[$0.id]?.page.items.isEmpty ?? true)
+            }
+    }
+
+    private var quietEmptyTitle: String {
+        if case .globalSnooze = model.store.quietReason { return "Notifications are snoozed" }
+        return "Quiet inbox"
     }
 
     // MARK: Following new activity
@@ -150,6 +177,7 @@ struct InboxListView: View {
                 id: "global-snooze", symbol: bellSymbol, label: "Snooze and quiet options",
                 active: model.store.quietReason != nil
             ) { model.globalMenuItems() }
+            IconButton(symbol: "rectangle.stack.badge.plus", label: "Custom sections") { model.openSectionSettings() }
             IconButton(symbol: "slider.horizontal.3", label: "Settings") { model.open(.settings) }
         }
     }
@@ -180,8 +208,34 @@ struct InboxListView: View {
     @ViewBuilder
     private func sections(_ b: Buckets, now: Date) -> some View {
         LazyVStack(alignment: .leading, spacing: theme.isFluid ? 6 : 1) {
-            if b.new.isEmpty && b.pending.isEmpty {
-                EmptyInbox()
+            ForEach(model.settings.customSections) { CustomInboxSection(section: $0) }
+            if showsConnectionEmpty, let error = model.store.lastSyncError {
+                VStack(spacing: 0) {
+                    EmptyInbox(artwork: .connectionError, title: "Unable to load your inbox", message: syncErrorText(error))
+                    PillButton(title: "Retry", symbol: "arrow.clockwise", kind: .primary) {
+                        Task { await model.store.refresh() }
+                    }
+                    .padding(.bottom, 18)
+                }
+                .frame(maxWidth: .infinity)
+            } else if model.searchQuery.isEmpty {
+                if b.new.isEmpty, b.pending.isEmpty, model.settings.customSections.isEmpty,
+                   !(model.showSnoozed && !b.snoozed.isEmpty), !(model.showDone && !b.done.isEmpty) {
+                    if model.store.quietReason != nil || !b.snoozed.isEmpty {
+                        EmptyInbox(
+                            artwork: .quiet,
+                            title: quietEmptyTitle,
+                            message: model.store.quietReason == nil
+                                ? "Snoozed conversations will return when their timers end."
+                                : "New activity will collect silently.")
+                    } else if b.done.isEmpty {
+                        EmptyInbox(artwork: .empty, title: "Your inbox is empty")
+                    } else {
+                        EmptyInbox()
+                    }
+                }
+            } else if b.isEmpty, !model.settings.customSections.contains(where: { !model.customItems(in: $0.id).isEmpty }) {
+                NoMatches()
             }
             section(.new, title: "New", groups: b.new, now: now)
             section(.pending, title: "Pending", groups: b.pending, now: now)
@@ -219,7 +273,7 @@ struct InboxListView: View {
 
     @ViewBuilder
     private var footer: some View {
-        if let error = model.store.lastSyncError {
+        if let error = model.store.lastSyncError, !showsConnectionEmpty {
             HStack(spacing: 7) {
                 Image(systemName: "wifi.exclamationmark").foregroundStyle(theme.warn)
                 Text(syncErrorText(error)).lineLimit(1)
@@ -272,20 +326,22 @@ struct InboxListView: View {
     }
 }
 
-/// Groups split into the four buckets, sorted like the prototype.
-struct Buckets {
-    var new: [InboxGroup]
-    var pending: [InboxGroup]
-    var snoozed: [InboxGroup]
-    var done: [InboxGroup]
+/// A reference snapshot keeps SwiftUI from recursively comparing every group's payload in view closures.
+final class Buckets {
+    let new: [InboxGroup]
+    let pending: [InboxGroup]
+    let snoozed: [InboxGroup]
+    let done: [InboxGroup]
 
     @MainActor
-    init(store: InboxStore, now: Date) {
-        new = store.groups(in: .new).sorted { $0.lastActivityAt > $1.lastActivityAt }
-        pending = store.groups(in: .pending).sorted { $0.lastActivityAt > $1.lastActivityAt }
-        snoozed = store.groups(in: .snoozed).sorted { ($0.snoozedUntil ?? .distantFuture) < ($1.snoozedUntil ?? .distantFuture) }
-        done = store.groups(in: .done).sorted { ($0.doneAt ?? .distantPast) > ($1.doneAt ?? .distantPast) }
+    init(store: InboxStore, now: Date, include: (InboxGroup) -> Bool = { _ in true }) {
+        new = store.groups(in: .new).filter(include).sorted { $0.lastActivityAt > $1.lastActivityAt }
+        pending = store.groups(in: .pending).filter(include).sorted { $0.lastActivityAt > $1.lastActivityAt }
+        snoozed = store.groups(in: .snoozed).filter(include).sorted { ($0.snoozedUntil ?? .distantFuture) < ($1.snoozedUntil ?? .distantFuture) }
+        done = store.groups(in: .done).filter(include).sorted { ($0.doneAt ?? .distantPast) > ($1.doneAt ?? .distantPast) }
     }
+
+    var isEmpty: Bool { new.isEmpty && pending.isEmpty && snoozed.isEmpty && done.isEmpty }
 
     /// Rows in visual order, honoring collapsed sections (keyboard navigation order).
     func visible(showSnoozed: Bool, showDone: Bool) -> [InboxGroup] {
@@ -346,18 +402,107 @@ private struct SummaryChip: View {
 }
 
 private struct EmptyInbox: View {
-    @Environment(\.theme) private var theme
+    var artwork: InboxArtwork = .caughtUp
+    var title = "All caught up"
+    var message = "New activity will land here."
 
     var body: some View {
         VStack(spacing: 4) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(theme.success)
-                .frame(width: 38, height: 38)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(theme.chipBackground))
-                .padding(.bottom, 6)
-            Text("All caught up").font(.system(size: 13, weight: .semibold))
-            Text("New activity will land here.").font(.system(size: 12)).foregroundStyle(.tertiary)
+            InboxIllustration(artwork).padding(.bottom, 6)
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+    }
+}
+
+/// Inbox search (`/` focuses it). Esc clears the text first; Down / Return move to the first result (NotchController).
+private struct InboxSearchField: View {
+    @Environment(NotchModel.self) private var model
+    @Environment(\.theme) private var theme
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(focused ? AnyShapeStyle(theme.accent) : AnyShapeStyle(.tertiary))
+                TextField("Search", text: $model.searchText, prompt: Text("Search inbox"))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .focused($focused)
+                    .accessibilityLabel("Search inbox")
+                if !model.searchText.isEmpty {
+                    IconButton(symbol: "xmark.circle.fill", label: "Clear search", size: 20) { model.searchText = "" }
+                } else if !focused {
+                    Text("/")
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 16, height: 16)
+                        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(theme.hairline))
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.leading, 9)
+            .padding(.trailing, 4)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: theme.isFluid ? 14 : 8, style: .continuous).fill(theme.inputBackground))
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.isFluid ? 14 : 8, style: .continuous)
+                    .strokeBorder(focused ? theme.accent.opacity(0.7) : theme.hairline, lineWidth: focused ? 1 : 0.5)
+            )
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+            if focused && model.searchText.isEmpty {
+                SearchHints()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+        .onChange(of: model.searchFocusToken) { focused = true }
+        .onChange(of: focused) { _, now in model.searchFocused = now }
+    }
+}
+
+/// Qualifier cheat sheet shown while the search field is focused and empty.
+private struct SearchHints: View {
+    @Environment(\.theme) private var theme
+    private static let hints = ["repo:", "author:", "reason:", "is:unread", "is:pr", "-negate"]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.hints, id: \.self) { hint in
+                Text(hint)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .frame(height: 18)
+                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(theme.chipBackground))
+                    .fixedSize()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Search qualifiers: repo, author, reason, is unread, is pr; prefix with a dash to exclude")
+    }
+}
+
+private struct NoMatches: View {
+    @Environment(NotchModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 4) {
+            InboxIllustration(.noSearchResults).padding(.bottom, 6)
+            Text("No matches").font(.system(size: 13, weight: .semibold))
+            Text("Nothing in your inbox matches this search.").font(.system(size: 12)).foregroundStyle(.tertiary)
+            PillButton(title: "Clear", kind: .ghost) { model.searchText = "" }
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 22)

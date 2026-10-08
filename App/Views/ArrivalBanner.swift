@@ -43,7 +43,7 @@ struct ArrivalBannerView: View {
                 .accessibilityHint("Opens the conversation")
                 .debugNotchMenu(model)
         }
-        .frame(width: width, height: (banded ? model.host.topInset + 66 : (theme.isFluid ? 70 : 66)) + extraHeight)
+        .frame(width: width, height: banded ? model.host.topInset + 66 : (theme.isFluid ? 70 : 66))
         .onHover { hovering in
             if !hovering, model.bannerHovered { hoverEnded = true }
             model.bannerHovered = hovering
@@ -79,17 +79,6 @@ struct ArrivalBannerView: View {
                         insertion: .offset(y: 6).combined(with: .opacity), removal: .opacity
                     ))
                 lineTwo
-                if case .morningSummary(let summary) = arrival.kind {
-                    ForEach(shelfLines(summary), id: \.self) { line in
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.pull").foregroundStyle(theme.accent)
-                            Text(line).foregroundStyle(.secondary)
-                        }
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .padding(.top, 2)
-                    }
-                }
             }
             .animation(motion.pop, value: lineOneKey)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -140,19 +129,6 @@ struct ArrivalBannerView: View {
         }
     }
 
-    /// The morning summary lists up to three PR Shelf changes under its two lines.
-    private static let maxShelfLines = 3
-
-    private func shelfLines(_ summary: MorningSummary) -> [String] {
-        let shown = Array(summary.shelfChanges.prefix(Self.maxShelfLines))
-        let more = summary.shelfChanges.count - shown.count
-        return more > 0 ? shown + ["and \(Format.plural(more, "more shelf change"))"] : shown
-    }
-
-    private var extraHeight: CGFloat {
-        guard case .morningSummary(let summary) = arrival.kind else { return 0 }
-        return CGFloat(shelfLines(summary).count) * 18
-    }
 
     private var lineOneKey: String {
         switch arrival.kind {
@@ -230,7 +206,6 @@ struct ArrivalBannerView: View {
     }
 
     private func morningTitle(_ summary: MorningSummary) -> String {
-        guard summary.updates > 0 else { return "Good morning · PR Shelf changes" }
         return "Overnight: \(Format.plural(summary.updates, "update")) in \(Format.plural(summary.conversations, "conversation"))"
     }
 
@@ -253,7 +228,7 @@ struct ArrivalBannerView: View {
         case .summary(let updates, let groups, _, let reason):
             return "\(summaryTitle(reason)). \(updates) updates in \(groups) conversations"
         case .morningSummary(let summary):
-            return ([morningTitle(summary), repoLine(summary)] + summary.shelfChanges).joined(separator: ". ")
+            return [morningTitle(summary), repoLine(summary)].joined(separator: ". ")
         }
     }
 }

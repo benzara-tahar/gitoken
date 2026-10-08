@@ -161,14 +161,18 @@ struct NotchBarButton: View {
     @ViewBuilder
     private var background: some View {
         if model.isNotchAttached {
-            IslandShape(ear: 9, topRadius: 0, bottomRadius: 13)
-                .fill(Color.black)
+            let shape = IslandShape(ear: 9, topRadius: 0, bottomRadius: 13)
+            shape.fill(Color.black)
+                .overlay { NotchStatusRim(shape: shape) }
                 .padding(.horizontal, -9)
         } else if theme.isFluid {
-            Capsule().fill(Color.black).shadow(color: .black.opacity(0.38), radius: 9, y: 6)
+            Capsule().fill(Color.black)
+                .overlay { NotchStatusRim(shape: Capsule()) }
+                .shadow(color: .black.opacity(0.38), radius: 9, y: 6)
         } else {
             GlassBackground(shape: Capsule())
                 .environment(\.colorScheme, .dark)
+                .overlay { NotchStatusRim(shape: Capsule()) }
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
         }
     }

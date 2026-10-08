@@ -35,7 +35,10 @@ struct InboxRow: View {
                 }
             }
             .animation(.easeOut(duration: 0.12), value: showActions)
-            .onHover { hovering = $0 }
+            .onHover {
+                hovering = $0
+                if $0 { model.prefetchPreview(for: group.id) }
+            }
             .contextMenu { contextMenu }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilityText)

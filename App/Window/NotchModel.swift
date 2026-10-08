@@ -11,6 +11,7 @@ final class NotchModel {
         case collapsed
         case list
         case conversation(ThreadID)
+        case searchConversation(SearchItemID)
         case settings
 
         var isOpen: Bool { self != .collapsed }
@@ -26,10 +27,32 @@ final class NotchModel {
 
     let store: InboxStore
     let sounds = SoundPlayer()
-    let openLocally: OpenLocallyCoordinator
-    let shelf: ShelfStore
+    let previews: FilePreviewStore
+    /// Set by `PreviewController` at launch.
+    @ObservationIgnored weak var previewController: PreviewController?
+    /// The reusable preview window is showing. Maintained by `PreviewController`.
+    var isPreviewOpen = false
 
     private(set) var route: Route = .collapsed
+    struct NavigationState {
+        let history: [Route]
+        let selectedRow: ThreadID?
+        let selectedSearchRow: SearchRowID?
+        let searchText: String
+    }
+
+    /// Open routes survive collapse; Back never removes the root inbox.
+    @ObservationIgnored private var history: [Route] = [.list]
+    @ObservationIgnored private var activeConversation: ThreadID?
+    @ObservationIgnored private var visitStarted = false
+    @ObservationIgnored private var visitGeneration = 0
+    @ObservationIgnored private var conversationLoads: [ThreadID: (generation: Int, task: Task<Void, Never>)] = [:]
+    @ObservationIgnored private var activeSearchConversation: SearchItemID?
+    @ObservationIgnored private var searchVisitGeneration = 0
+    @ObservationIgnored private var searchLoads: [SearchItemID: (generation: Int, task: Task<Void, Never>)] = [:]
+    @ObservationIgnored private var searchSubjects: [SearchItemID: SearchItem] = [:]
+    private var searchAccountLogin: String?
+    private(set) var panelFocusToken = 0
     var host: HostScreen = .fallback
     var hiddenForFullscreen = false
     var systemReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -42,7 +65,26 @@ final class NotchModel {
     var olderShown: Set<ThreadID> = []
     var drafts: [ThreadID: String] = [:]
     var replyTargets: [ThreadID: ReviewComment] = [:]
-    var selectedRow: ThreadID?
+    var selectedRow: ThreadID? {
+        didSet { if selectedRow != nil { selectedSearchRow = nil } }
+    }
+    var selectedSearchRow: SearchRowID? {
+        didSet { if selectedSearchRow != nil { selectedRow = nil } }
+    }
+    var settingsTab: SettingsTab = .general
+    var sectionDraft: CustomSection?
+    var sectionPendingDeletion: CustomSection?
+    var sectionQueryPreview: (id: UUID, query: String, page: SearchPage)?
+    /// Inbox search text; preserved with the opened route when the panel collapses.
+    var searchText = "" {
+        didSet { if searchText != oldValue { searchChanged() } }
+    }
+    /// `searchText` parsed; empty when it holds no terms.
+    private(set) var searchQuery = InboxQuery("")
+    /// Bumped to move keyboard focus into the inbox search field.
+    private(set) var searchFocusToken = 0
+    /// The search field has keyboard focus (Down / Return move to the first result).
+    var searchFocused = false
     var menu: PanelMenu?
     var menuHighlight: Int?
     var toast: Toast?
@@ -55,6 +97,7 @@ final class NotchModel {
     var hotKeyUnavailable = false
 
     func requestComposerFocus() { composerFocusToken += 1 }
+    func requestSearchFocus() { searchFocusToken += 1 }
     /// Last known frames (surface space) of menu-opening controls, keyed by menu anchor id.
     @ObservationIgnored var anchorFrames: [String: CGRect] = [:]
 
@@ -62,8 +105,7 @@ final class NotchModel {
 
     init(store: InboxStore) {
         self.store = store
-        openLocally = OpenLocallyCoordinator(store: store)
-        shelf = store.makeShelfStore()
+        previews = store.makeFilePreviewStore()
     }
 
     // MARK: Derived presentation
@@ -93,6 +135,38 @@ final class NotchModel {
 
     func group(_ id: ThreadID) -> InboxGroup? { store.groups.first { $0.id == id } }
 
+    /// Inbox buckets filtered by the search; the list view and keyboard navigation both read this.
+    func buckets() -> Buckets {
+        let query = searchQuery
+        return Buckets(store: store, now: store.now.now()) { group in
+            query.isEmpty || query.matches(group, author: query.needsDetail ? self.subjectAuthor(group) : nil)
+        }
+    }
+
+    /// Rows in keyboard-navigation order (filtered, honoring collapsed sections).
+    var listRows: [InboxGroup] { buckets().visible(showSnoozed: showSnoozed, showDone: showDone) }
+
+    /// A query change keeps the selection on a visible result.
+    private func searchChanged() {
+        searchQuery = InboxQuery(searchText)
+        guard route == .list else { return }
+        let rows = keyboardRows
+        if let selection = listSelection, rows.contains(selection) { return }
+        selectListRow(rows.first)
+    }
+
+    /// Subject authors read from the detail cache for `author:`, per thread activity, so renders don't hit the
+    /// database; reset when the panel closes.
+    @ObservationIgnored private var authorCache: [ThreadID: (activity: Date, author: Actor?)] = [:]
+
+    private func subjectAuthor(_ group: InboxGroup) -> Actor? {
+        if let author = store.conversations[group.id]?.detail?.author { return author }
+        if let hit = authorCache[group.id], hit.activity == group.lastActivityAt { return hit.author }
+        let author = store.detail(for: group.id)?.author
+        authorCache[group.id] = (group.lastActivityAt, author)
+        return author
+    }
+
     var viewerLogin: String? {
         if case .ready(let viewer) = store.phase { return viewer.login }
         return nil
@@ -100,35 +174,148 @@ final class NotchModel {
 
     // MARK: Navigation
 
+    var navigationState: NavigationState {
+        NavigationState(history: history, selectedRow: selectedRow, selectedSearchRow: selectedSearchRow, searchText: searchText)
+    }
+
     func toggleFromNotch() {
-        if route.isOpen { close() } else { open(.list) }
+        if route.isOpen { close() } else { reopen() }
+    }
+
+    func reopen() {
+        guard !route.isOpen, !hiddenForFullscreen else { return }
+        transition(to: history.last ?? .list)
     }
 
     func open(_ next: Route) {
-        let previous = route
-        menu = nil
-        menuHighlight = nil
-        if previous == next { return }
-        if case .conversation(let old) = previous { store.closeConversation(old) }
-        if next.isOpen { drainArrivals() }
-        withAnimation(motion.open) { route = next }
-        if case .conversation(let id) = next {
-            selectedRow = id
-            Task { await store.openConversation(id) }
+        guard next.isOpen else { close(); return }
+        if let index = history.lastIndex(of: next) {
+            history.removeSubrange((index + 1)..<history.count)
+        } else {
+            history.append(next)
         }
+        transition(to: next)
     }
+
+    func restoreNavigation(_ state: NavigationState) {
+        history = state.history
+        searchText = state.searchText
+        selectedRow = state.selectedRow
+        selectedSearchRow = state.selectedSearchRow
+        guard !hiddenForFullscreen else { return }
+        transition(to: history.last ?? .list)
+    }
+
+    func requestPanelFocus() { panelFocusToken += 1 }
 
     func close() {
         guard route.isOpen else { return }
-        if case .conversation(let id) = route { store.closeConversation(id) }
-        menu = nil
-        menuHighlight = nil
-        composerFocused = false
-        withAnimation(motion.close) { route = .collapsed }
+        transition(to: .collapsed)
+        authorCache = [:]
     }
 
     func back() {
-        open(.list)
+        guard route.isOpen, history.count > 1 else { return }
+        history.removeLast()
+        transition(to: history.last ?? .list)
+    }
+
+    private func transition(to next: Route) {
+        menu = nil
+        menuHighlight = nil
+        guard route != next else { syncConversationVisit(); return }
+        composerFocused = false
+        searchFocused = false
+        isRecordingHotKey = false
+        if next.isOpen { drainArrivals() }
+        withAnimation(next.isOpen ? motion.open : motion.close) { route = next }
+        if case .conversation(let id) = next { selectedRow = id }
+        syncConversationVisit()
+    }
+
+    private func syncConversationVisit() {
+        // Settings keeps its originating conversation's visit alive.
+        var next: ThreadID?
+        var nextSearch: SearchItemID?
+        if route.isOpen {
+            for candidate in history.reversed() {
+                switch candidate {
+                case .conversation(let id): next = id
+                case .searchConversation(let id): nextSearch = id
+                case .settings: continue
+                case .list, .collapsed: break
+                }
+                break
+            }
+        }
+        syncSearchVisit(nextSearch)
+        guard next != activeConversation else { return }
+        if let activeConversation, visitStarted { store.closeConversation(activeConversation) }
+        activeConversation = next
+        visitStarted = false
+        visitGeneration += 1
+        guard let next else { return }
+        let generation = visitGeneration
+        // A new visit waits for this thread's previous load to finish before hydrating again.
+        let previousLoad = conversationLoads[next]?.task
+        let task = Task { [weak self] in
+            await previousLoad?.value
+            guard let self else { return }
+            guard self.activeConversation == next, self.visitGeneration == generation else {
+                if self.conversationLoads[next]?.generation == generation { self.conversationLoads[next] = nil }
+                return
+            }
+            self.visitStarted = true
+            await self.store.openConversation(next)
+            if self.conversationLoads[next]?.generation == generation { self.conversationLoads[next] = nil }
+        }
+        conversationLoads[next] = (generation, task)
+    }
+
+    private func syncSearchVisit(_ next: SearchItemID?) {
+        if next == activeSearchConversation {
+            if case .searchConversation = route, let next, let state = store.customSections.conversations[next],
+               !state.isLoading, state.detail == nil, state.error == nil, let item = searchItem(next) {
+                Task { await store.customSections.openConversation(item) }
+            }
+            return
+        }
+        if let activeSearchConversation { store.customSections.closeConversation(activeSearchConversation) }
+        activeSearchConversation = next
+        searchVisitGeneration += 1
+        guard let next, let item = searchItem(next) else { return }
+        let generation = searchVisitGeneration
+        let previous = searchLoads[next]?.task
+        let task = Task { [weak self] in
+            await previous?.value
+            guard let self, self.activeSearchConversation == next, self.searchVisitGeneration == generation else { return }
+            await self.store.customSections.openConversation(item)
+            if self.searchLoads[next]?.generation == generation { self.searchLoads[next] = nil }
+        }
+        searchLoads[next] = (generation, task)
+    }
+
+    func searchItem(_ id: SearchItemID) -> SearchItem? { store.customSections.item(id) ?? searchSubjects[id] }
+
+    func openSearch(_ item: SearchItem) {
+        searchSubjects[item.id] = item
+        closePreview()
+        open(.searchConversation(item.id))
+    }
+
+    func syncSearchAccount() {
+        guard let login = viewerLogin, login != searchAccountLogin else { return }
+        searchAccountLogin = login
+        searchSubjects = [:]
+        sectionQueryPreview = nil
+        selectedSearchRow = nil
+        history.removeAll { if case .searchConversation = $0 { true } else { false } }
+        if case .searchConversation = route { transition(to: history.last ?? .list) }
+    }
+
+    func openSectionSettings() {
+        settingsTab = .sections
+        open(.settings)
     }
 
     /// Arrivals are announced only while the panel is closed; opening it consumes the queue.
@@ -224,6 +411,39 @@ final class NotchModel {
         toastTask?.cancel()
         withAnimation(motion.fade) { toast = nil }
         undo()
+    }
+
+    // MARK: File preview
+
+    func previewTarget(for comment: ReviewComment, in group: InboxGroup) -> PreviewTarget? {
+        guard let ref = pullRequestRef(group) else { return nil }
+        return PreviewTarget(threadID: group.id, ref: ref, path: comment.path, commentID: comment.id)
+    }
+
+    /// The group's newest review comment, from conversation detail already in memory (never hydrates).
+    func newestPreviewTarget(for id: ThreadID) -> PreviewTarget? {
+        guard let g = group(id), let ref = pullRequestRef(g), let detail = store.detail(for: id) else { return nil }
+        return PreviewTarget.newest(in: detail, threadID: id, ref: ref)
+    }
+
+    func openPreview(_ comment: ReviewComment, in group: InboxGroup) {
+        guard let target = previewTarget(for: comment, in: group) else { return }
+        previewController?.show(target)
+    }
+
+    func togglePreview() { previewController?.toggle() }
+
+    func closePreview() { previewController?.close() }
+
+    /// Hover / selection warm-up for the group's newest review comment.
+    func prefetchPreview(for id: ThreadID) {
+        guard let target = newestPreviewTarget(for: id) else { return }
+        previews.prefetch(target)
+    }
+
+    func prefetchPreview(_ comment: ReviewComment, in group: InboxGroup) {
+        guard let target = previewTarget(for: comment, in: group) else { return }
+        previews.prefetch(target)
     }
 
     // MARK: Menus

@@ -46,8 +46,10 @@ public final class FixtureGitHubService: GitHubService {
         var doneCalls: [ThreadID] = []
         /// `addReaction` calls in order, as (subject node id, content).
         var reactions: [(subjectID: String, content: ReactionContent)] = []
-        /// PR Shelf pull requests (see `FixtureGitHubService+PullRequests.swift`).
-        var shelf: [FixtureShelfPR] = []
+        /// Review thread node ids marked resolved (see `FixtureGitHubService+FilePreview.swift`).
+        var resolvedReviewThreads: Set<String> = []
+        /// Pending reviews and pushed commits (see `FixtureGitHubService+FilePreview.swift`).
+        var review = FixtureReviewState()
 
         func index(of key: String) -> Int? { threads.firstIndex { $0.subject.key == key } }
         func index(of id: ThreadID) -> Int? { threads.firstIndex { $0.id == id } }
@@ -63,7 +65,6 @@ public final class FixtureGitHubService: GitHubService {
         for seed in FixtureSeed.threads {
             Self.create(seed, relativeTo: start, in: &state)
         }
-        state.shelf = FixtureSeed.shelfPullRequests(relativeTo: start)
         self.state = Mutex(state)
     }
 
@@ -268,7 +269,7 @@ public final class FixtureGitHubService: GitHubService {
         state.version += 1
     }
 
-    private static func record(_ event: FixtureSeed.Event, by login: String, at: Date, onThreadAt index: Int, in state: inout State) {
+    static func record(_ event: FixtureSeed.Event, by login: String, at: Date, onThreadAt index: Int, in state: inout State) {
         let actor = FixtureSeed.person(login)
         let thread = state.threads[index]
         let url = thread.notification.htmlURL
@@ -321,7 +322,7 @@ public final class FixtureGitHubService: GitHubService {
         }
     }
 
-    private static func appendReview(
+    static func appendReview(
         state reviewState: ReviewState, body: RichBody, comments: [ReviewComment], by login: String, at: Date,
         onThreadAt index: Int, in state: inout State
     ) {

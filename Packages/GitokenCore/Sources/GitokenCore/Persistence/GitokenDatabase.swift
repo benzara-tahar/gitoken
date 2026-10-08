@@ -99,7 +99,63 @@ final class GitokenDatabase: Sendable {
                 t.add(column: "collectedGroupUpdates", .text)
             }
         }
-        registerShelfMigration(in: &migrator)
+        // Keep the shipped migration intact so existing databases retain a valid migration history.
+        migrator.registerMigration("v3-pr-shelf") { db in
+            try db.create(table: "shelfPin") { t in
+                t.column("accountHost", .text).notNull()
+                t.column("accountLogin", .text).notNull()
+                t.column("owner", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("number", .integer).notNull()
+                t.column("pinnedAt", .double).notNull()
+                t.primaryKey(["accountHost", "accountLogin", "owner", "name", "number"])
+            }
+            try db.create(table: "shelfStatus") { t in
+                t.column("accountHost", .text).notNull()
+                t.column("accountLogin", .text).notNull()
+                t.column("owner", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("number", .integer).notNull()
+                t.column("status", .text).notNull()
+                t.column("isMine", .boolean).notNull()
+                t.primaryKey(["accountHost", "accountLogin", "owner", "name", "number"])
+            }
+            try db.create(table: "shelfEvent") { t in
+                t.column("accountHost", .text).notNull()
+                t.column("accountLogin", .text).notNull()
+                t.column("id", .text).notNull()
+                t.column("event", .text).notNull()
+                t.column("at", .double).notNull()
+                t.primaryKey(["accountHost", "accountLogin", "id"])
+            }
+        }
+        migrator.registerMigration("v4-remove-pr-shelf") { db in
+            try db.drop(table: "shelfPin")
+            try db.drop(table: "shelfStatus")
+            try db.drop(table: "shelfEvent")
+        }
+        migrator.registerMigration("v5-collected-group-actors") { db in
+            try db.alter(table: AppStateRow.databaseTableName) { t in
+                t.add(column: "collectedGroupActors", .text)
+            }
+        }
+        migrator.registerMigration("v6-custom-sections") { db in
+            try db.create(table: "searchSubjectState") { t in
+                t.column("accountHost", .text).notNull()
+                t.column("accountLogin", .text).notNull()
+                t.column("subjectID", .text).notNull()
+                t.column("state", .text).notNull()
+                t.primaryKey(["accountHost", "accountLogin", "subjectID"])
+            }
+            try db.create(table: "customSectionCache") { t in
+                t.column("accountHost", .text).notNull()
+                t.column("accountLogin", .text).notNull()
+                t.column("sectionID", .text).notNull()
+                t.column("query", .text).notNull()
+                t.column("result", .text).notNull()
+                t.primaryKey(["accountHost", "accountLogin", "sectionID", "query"])
+            }
+        }
         return migrator
     }
 
@@ -158,6 +214,76 @@ final class GitokenDatabase: Sendable {
 
     func save(_ detail: ThreadDetail, for account: AccountKey) throws {
         try queue.write { db in try DetailRow(account: account, detail: detail).upsert(db) }
+    }
+
+    // MARK: Custom sections (independent of notification threads)
+
+    func searchSubjectStates(for account: AccountKey) throws -> [SearchItemID: StoredSearchSubject] {
+        try queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT subjectID, state FROM searchSubjectState WHERE accountHost = ? AND accountLogin = ?
+                """, arguments: [account.host, account.login])
+            return try Dictionary(uniqueKeysWithValues: rows.map { row in
+                (SearchItemID(row["subjectID"]), try StorageJSON.decode(StoredSearchSubject.self, from: row["state"]))
+            })
+        }
+    }
+
+    func customSectionCache(for section: CustomSection, account: AccountKey) throws -> StoredCustomSectionPage? {
+        try queue.read { db in
+            let json = try String.fetchOne(db, sql: """
+                SELECT result FROM customSectionCache
+                WHERE accountHost = ? AND accountLogin = ? AND sectionID = ? AND query = ?
+                """, arguments: [account.host, account.login, section.id.uuidString, section.query])
+            return try StorageJSON.decodeIfPresent(StoredCustomSectionPage.self, from: json)
+        }
+    }
+
+    func saveSearchSubjects(_ states: [StoredSearchSubject], for account: AccountKey) throws {
+        try queue.write { db in try Self.saveSearchSubjects(states, for: account, in: db) }
+    }
+
+    func saveCustomSection(
+        _ result: StoredCustomSectionPage, section: CustomSection,
+        subjects: [StoredSearchSubject], account: AccountKey
+    ) throws {
+        try queue.write { db in
+            try Self.saveSearchSubjects(subjects, for: account, in: db)
+            try db.execute(sql: """
+                INSERT INTO customSectionCache (accountHost, accountLogin, sectionID, query, result)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (accountHost, accountLogin, sectionID, query) DO UPDATE SET result = excluded.result
+                """, arguments: [
+                    account.host, account.login, section.id.uuidString, section.query, try StorageJSON.encode(result),
+                ])
+        }
+    }
+
+    func pruneCustomSectionCaches(keeping sections: [CustomSection]) throws {
+        let queries = Dictionary(sections.map { ($0.id.uuidString, $0.query) }, uniquingKeysWith: { first, _ in first })
+        try queue.write { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT DISTINCT sectionID, query FROM customSectionCache")
+            for row in rows {
+                let id: String = row["sectionID"]
+                let query: String = row["query"]
+                if queries[id] != query {
+                    try db.execute(
+                        sql: "DELETE FROM customSectionCache WHERE sectionID = ? AND query = ?",
+                        arguments: [id, query])
+                }
+            }
+        }
+    }
+
+    private static func saveSearchSubjects(
+        _ states: [StoredSearchSubject], for account: AccountKey, in db: Database
+    ) throws {
+        for state in states {
+            try db.execute(sql: """
+                INSERT INTO searchSubjectState (accountHost, accountLogin, subjectID, state) VALUES (?, ?, ?, ?)
+                ON CONFLICT (accountHost, accountLogin, subjectID) DO UPDATE SET state = excluded.state
+                """, arguments: [account.host, account.login, state.item.id.rawValue, try StorageJSON.encode(state)])
+        }
     }
 }
 
@@ -314,11 +440,13 @@ private struct AppStateRow: FetchableRecord, PersistableRecord {
         state.lastModified = row["lastModified"]
         state.viewer = try StorageJSON.decodeIfPresent(Actor.self, from: row["viewer"])
         let groupUpdates = try StorageJSON.decodeIfPresent([String: Int].self, from: row["collectedGroupUpdates"]) ?? [:]
+        let groupActors = try StorageJSON.decodeIfPresent([String: [Actor]].self, from: row["collectedGroupActors"]) ?? [:]
         state.collected = CollectedActivity(
             updates: row["collectedUpdates"],
             groupIDs: try StorageJSON.decode([ThreadID].self, from: row["collectedGroups"]),
             actors: try StorageJSON.decode([Actor].self, from: row["collectedActors"]),
-            groupUpdates: Dictionary(uniqueKeysWithValues: groupUpdates.map { (ThreadID($0.key), $0.value) }))
+            groupUpdates: Dictionary(uniqueKeysWithValues: groupUpdates.map { (ThreadID($0.key), $0.value) }),
+            groupActors: Dictionary(uniqueKeysWithValues: groupActors.map { (ThreadID($0.key), $0.value) }))
         state.collectedReason = try StorageJSON.decodeIfPresent(StoredQuietReason.self, from: row["collectedReason"])?.reason
         self.state = state
     }
@@ -335,6 +463,8 @@ private struct AppStateRow: FetchableRecord, PersistableRecord {
         container["collectedActors"] = try StorageJSON.encode(state.collected.actors)
         container["collectedGroupUpdates"] = try StorageJSON.encode(
             Dictionary(uniqueKeysWithValues: state.collected.groupUpdates.map { ($0.key.rawValue, $0.value) }))
+        container["collectedGroupActors"] = try StorageJSON.encode(
+            Dictionary(uniqueKeysWithValues: state.collected.groupActors.map { ($0.key.rawValue, $0.value) }))
         container["collectedReason"] = try state.collectedReason.map { try StorageJSON.encode(StoredQuietReason($0)) }
     }
 }

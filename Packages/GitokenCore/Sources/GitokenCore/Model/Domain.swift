@@ -220,9 +220,11 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
     public let replyToID: String?
     public let url: URL?
     public let reactions: [ReactionCount]
+    /// In the viewer's pending (unsubmitted) review.
+    public let isPending: Bool
     public init(
         id: String, databaseID: Int, author: Actor, body: RichBody, createdAt: Date, path: String, diffHunk: String,
-        line: Int?, replyToID: String?, url: URL?, reactions: [ReactionCount] = []
+        line: Int?, replyToID: String?, url: URL?, reactions: [ReactionCount] = [], isPending: Bool = false
     ) {
         self.id = id
         self.databaseID = databaseID
@@ -235,13 +237,14 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
         self.replyToID = replyToID
         self.url = url
         self.reactions = reactions
+        self.isPending = isPending
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, databaseID, author, body, createdAt, path, diffHunk, line, replyToID, url, reactions
+        case id, databaseID, author, body, createdAt, path, diffHunk, line, replyToID, url, reactions, isPending
     }
 
-    /// `reactions` was added after timelines were first cached; older rows decode with none.
+    /// `reactions` and `isPending` were added after timelines were first cached; older rows decode with none / false.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -255,12 +258,13 @@ public struct ReviewComment: Hashable, Codable, Sendable, Identifiable {
         replyToID = try c.decodeIfPresent(String.self, forKey: .replyToID)
         url = try c.decodeIfPresent(URL.self, forKey: .url)
         reactions = try c.decodeIfPresent([ReactionCount].self, forKey: .reactions) ?? []
+        isPending = try c.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
     }
 
     public func with(reactions: [ReactionCount]) -> ReviewComment {
         ReviewComment(
             id: id, databaseID: databaseID, author: author, body: body, createdAt: createdAt, path: path, diffHunk: diffHunk,
-            line: line, replyToID: replyToID, url: url, reactions: reactions)
+            line: line, replyToID: replyToID, url: url, reactions: reactions, isPending: isPending)
     }
 }
 

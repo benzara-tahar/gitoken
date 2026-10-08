@@ -70,6 +70,34 @@ enum FixtureSeed {
         ]
     )
 
+    /// `searchHunk` as first pushed: a 300ms debounce without abort. `w142-rc0` was written against it, so it is
+    /// outdated at head.
+    static let originalSearchHunk = Hunk(
+        file: "src/components/SearchBox.tsx",
+        header: "@@ -28,13 +28,15 @@ export function SearchBox({ onSearch, initialQuery }: Props) {",
+        newStart: 28,
+        lines: [
+            "   const [value, setValue] = useState(initialQuery ?? \"\");",
+            "   const inputRef = useRef<HTMLInputElement>(null);",
+            "-  useEffect(() => {",
+            "-    onSearch(value);",
+            "-  }, [value]);",
+            "+  const debounced = useDebouncedValue(value, 300);",
+            "+",
+            "+  useEffect(() => {",
+            "+    onSearch(debounced);",
+            "+  }, [debounced]);",
+            " ",
+            "   return (",
+            "     <div className={styles.root}>",
+            "       <SearchIcon aria-hidden />",
+            "       <input",
+            "         ref={inputRef}",
+            "         value={value}",
+            "         onChange={(e) => setValue(e.target.value)}",
+        ]
+    )
+
     static let resultsHunk = Hunk(
         file: "src/components/ResultList.tsx",
         header: "@@ -14,9 +14,14 @@ type Props = { results: SearchResult[]; query: string };",
@@ -196,9 +224,10 @@ enum FixtureSeed {
             Step(299, "akim", .reviewRequested(from: "schen")),
             Step(298.5, "akim", .reviewRequested(from: "platform/web-core")),
             Step(298, "akim", .reviewRequested(from: "platform/design-systems")),
+            Step(290, "schen", .reviewComment(key: "w142-rc0", hunk: originalSearchHunk, line: 30, body: "300ms feels sluggish when you type fast. The search spec calls for 250ms, and stale requests should be aborted when the query changes.")),
             Step(52, "copilot-pull-request-reviewer", .review(.commented, copilotOverview)),
             Step(48, "schen", .reviewComment(key: "w142-rc1", hunk: searchHunk, line: 37, body: "This effect re-subscribes on every keystroke because `onSearch` is recreated by the parent on each render. Could we wrap it in `useCallback` upstream, or keep the latest callback in a ref here?")),
-            Step(45, "schen", .reviewComment(key: "w142-rc2", hunk: resultsHunk, line: 23, body: "`key={index}` will defeat the row memoization as soon as results reorder. Can we key by `result.id`?")),
+            Step(45, "schen", .reviewComment(key: "w142-rc2", hunk: resultsHunk, line: 23, body: "`key={index}` will defeat the row memoization as soon as results reorder. Can we key by `result.id`?\n\n```suggestion\n        <li key={result.id}>{renderRow(result)}</li>\n```")),
             Step(40, "github-actions", .checks(ci("7be0d44", failed: ["lint", "unit-tests"]))),
             Step(31, "leom", .reply(toKey: "w142-rc1", body: "+1 to the ref. It also avoids a stale closure in the cleanup.")),
         ], seen: .through(5)),
@@ -241,6 +270,9 @@ enum FixtureSeed {
         Thread(subject: Subject(repo: "ui-kit", number: 298, kind: .pullRequest, title: "Tokens: rename spacing scale to t-shirt sizes", reason: .reviewRequested, author: "pnair"), steps: [
             Step(1420, "pnair", .opened("Renames `space-1…space-12` to `space-3xs…space-3xl`. A codemod lives in `scripts/codemods/spacing.ts`.")),
             Step(1419, "pnair", .reviewRequested(from: viewerLogin)),
+            Step(1412, "trivera", .reviewComment(key: "u298-rc1", hunk: spacingJSONHunk, line: 4, body: "Nice — these finally match the names in Figma.")),
+            Step(1410, "trivera", .reviewComment(key: "u298-rc2", hunk: spacingSCSSHunk, line: 15, body: "Unquoted `3xs` parses as the number 3 with the unit `xs`, so this lookup never matches. Quote the keys:\n\n```suggestion\n  @return map.get((\"3xs\": $space-3xs, \"2xs\": $space-2xs, \"xs\": $space-xs), $step);\n```")),
+            Step(1408, "ilaurent", .reviewComment(key: "u298-rc3", hunk: spacingCodemodHunk, line: 21, body: "`in` also matches inherited keys, so a literal like `\"toString\"` would be rewritten to a function.\n\n```suggestion\n      if (typeof value === \"string\" && Object.hasOwn(renames, value)) {\n```")),
             Step(1400, "github-actions", .checks(ci("0d9e6aa"))),
         ], seen: .all),
 

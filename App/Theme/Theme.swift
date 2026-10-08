@@ -30,13 +30,34 @@ nonisolated struct Theme: Equatable, Sendable {
     var eventAvatar: CGFloat { isFluid ? 28 : 26 }
     var bannerAvatar: CGFloat { isFluid ? 40 : 34 }
 
-    // Syntax tokens for diff hunks.
+    // Syntax tokens for code (diff hunks, code blocks, file preview).
     var tokenKeyword: Color { pick(Color(red: 0.77, green: 0.19, blue: 0.48), Color(red: 1, green: 0.48, blue: 0.72)) }
     var tokenString: Color { pick(Color(red: 0.06, green: 0.48, blue: 0.37), Color(red: 0.62, green: 0.89, blue: 0.64)) }
     var tokenNumber: Color { pick(Color(red: 0.65, green: 0.36, blue: 0), Color(red: 1, green: 0.71, blue: 0.42)) }
     var tokenFunction: Color { pick(Color(red: 0.18, green: 0.36, blue: 0.83), Color(red: 0.49, green: 0.77, blue: 1)) }
     var tokenType: Color { pick(Color(red: 0.48, green: 0.29, blue: 0.79), Color(red: 0.82, green: 0.66, blue: 1)) }
     var tokenComment: Color { Color.primary.opacity(0.42) }
+    var tokenProperty: Color { pick(Color(red: 0.11, green: 0.42, blue: 0.55), Color(red: 0.5, green: 0.84, blue: 0.92)) }
+    var tokenTag: Color { pick(Color(red: 0.13, green: 0.45, blue: 0.2), Color(red: 0.49, green: 0.87, blue: 0.56)) }
+    var tokenAttribute: Color { pick(Color(red: 0.55, green: 0.39, blue: 0.05), Color(red: 0.95, green: 0.8, blue: 0.47)) }
+    var tokenPunctuation: Color { Color.primary.opacity(0.6) }
+
+    func tokenColor(_ kind: HighlightKind) -> Color {
+        switch kind {
+        case .keyword: tokenKeyword
+        case .string: tokenString
+        case .number, .constant: tokenNumber
+        case .function: tokenFunction
+        case .type: tokenType
+        case .variable: Color.primary
+        case .property: tokenProperty
+        case .tag: tokenTag
+        case .attribute: tokenAttribute
+        case .comment: tokenComment
+        case .operator: tokenKeyword.opacity(0.85)
+        case .punctuation: tokenPunctuation
+        }
+    }
 
     /// Fluid is always dark; Calm follows the system appearance, so its tones switch with it.
     private func pick(_ light: Color, _ dark: Color) -> Color {

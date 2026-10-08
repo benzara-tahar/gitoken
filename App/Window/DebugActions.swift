@@ -22,15 +22,6 @@ extension NotchModel {
         }
     }
 
-    /// Scripted PR Shelf change; the shelf refresh diffs it into events (bounce + sound when enabled and not quiet).
-    func debugShelf(_ transition: FixtureGitHubService.ShelfTransition) {
-        guard let fixtures = store.fixtureService else { return }
-        let shelf = shelf
-        Task {
-            await fixtures.applyShelfTransition(transition)
-            await shelf.refresh()
-        }
-    }
 }
 
 /// Right-click menu on the notch in debug builds; works while a banner is showing, so merges can be demoed.
@@ -42,7 +33,6 @@ struct DebugNotchMenu: View {
             Button("Send Notification") { model.debugFixture(closePanel: false) { await $0.enqueueNotification() } }
             Button("Burst on Pull Request") { model.debugFixture(closePanel: false) { await $0.enqueueBurst() } }
             Button("Activity on Done Thread") { model.debugFixture(closePanel: false) { await $0.enqueueActivityOnDoneThread() } }
-            Menu("PR Shelf") { ShelfDebugMenu(model: model) }
             Divider()
         }
         Button("Advance Clock 30 Minutes") { model.debugAdvanceClock(by: 30 * 60) }
@@ -51,18 +41,6 @@ struct DebugNotchMenu: View {
     }
 }
 
-/// Scripted PR Shelf transitions (`--fixtures` only); also the debug right-click menu on the shelf circle.
-struct ShelfDebugMenu: View {
-    let model: NotchModel
-
-    var body: some View {
-        if model.store.fixtureService != nil {
-            ForEach(FixtureGitHubService.ShelfTransition.allCases, id: \.self) { transition in
-                Button(transition.title) { model.debugShelf(transition) }
-            }
-        }
-    }
-}
 #endif
 
 import SwiftUI
@@ -78,13 +56,4 @@ extension View {
         #endif
     }
 
-    /// Attaches the shelf fixture-transition menu in debug builds; a no-op in release.
-    @ViewBuilder
-    func debugShelfMenu(_ model: NotchModel) -> some View {
-        #if DEBUG
-        contextMenu { ShelfDebugMenu(model: model) }
-        #else
-        self
-        #endif
-    }
 }

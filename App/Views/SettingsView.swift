@@ -3,6 +3,12 @@ import GitokenCore
 import ServiceManagement
 import SwiftUI
 
+enum SettingsTab: String, CaseIterable {
+    case general = "General"
+    case notifications = "Notifications"
+    case sections = "Sections"
+}
+
 struct SettingsView: View {
     @Environment(NotchModel.self) private var model
     @Environment(\.theme) private var theme
@@ -11,46 +17,85 @@ struct SettingsView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var loginStatus = SMAppService.mainApp.status
     @State private var loginError: String?
+    private var tab: SettingsTab { model.settingsTab }
+
+    private var backTitle: String {
+        if let previous = model.navigationState.history.dropLast().last {
+            switch previous {
+            case .conversation, .searchConversation: return "Conversation"
+            default: break
+            }
+        }
+        return "Inbox"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             SurfaceHeader(width: width) {
-                BackButton { model.back() }
+                BackButton(title: backTitle) { model.back() }
             } trailing: {
                 Text("Settings").font(.system(size: 13.5, weight: .semibold)).padding(.trailing, 4)
             }
+            Picker("Settings tab", selection: Binding(get: { model.settingsTab }, set: { model.settingsTab = $0 })) {
+                ForEach(SettingsTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .accessibilityLabel("Settings tab")
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
             ScrollView {
                 content
                     .padding(.horizontal, 14)
                     .padding(.bottom, 14)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(height: min(contentHeight, max(200, maxHeight - 44)))
+            .frame(height: min(contentHeight, max(200, maxHeight - 76)))
         }
         .frame(width: width)
-        .onAppear { loginStatus = SMAppService.mainApp.status }
+        .onAppear {
+            loginStatus = SMAppService.mainApp.status
+        }
     }
 
     private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            BrandLogo(width: 132)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            switch tab {
+            case .general: generalSettings
+            case .notifications: notificationSettings
+            case .sections: CustomSectionsSettings()
+            }
+
+            Text(footer)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .padding(.top, 14)
+        }
+    }
+
+    private var generalSettings: some View {
         let store = model.store
         let s = store.settings
         return VStack(alignment: .leading, spacing: 0) {
             section("Preset", first: true) {
                 HStack(spacing: 8) {
-                    PresetCard(appearance: .calm, title: "Calm", subtitle: "Native glass · gentle fades", selected: preset(s) == .calm) {
+                    PresetCard(appearance: .calm, title: "Calm", subtitle: "Native glass · gentle fades", selected: s.appearance == .calm) {
                         store.updateSettings { $0 = AppSettings.preset(.calm, keeping: $0) }
                     }
-                    PresetCard(appearance: .fluid, title: "Fluid", subtitle: "Dark island · elastic", selected: preset(s) == .fluid) {
+                    PresetCard(appearance: .fluid, title: "Fluid", subtitle: "Dark island · elastic", selected: s.appearance == .fluid) {
                         store.updateSettings { $0 = AppSettings.preset(.fluid, keeping: $0) }
                     }
                 }
             }
             card {
-                row("Appearance") {
-                    segmented(Appearance.allCases, selection: s.appearance, label: { $0 == .calm ? "Calm glass" : "Fluid dark" }) { v in
-                        store.updateSettings { $0.appearance = v }
-                    }
-                }
                 row("Motion", last: true) {
                     segmented(MotionStyle.allCases, selection: s.motion, label: { $0.rawValue.capitalized }) { v in
                         store.updateSettings { $0.motion = v }
@@ -72,7 +117,40 @@ struct SettingsView: View {
                 }
                 note(model.host.hasNotch ? "Floating pill sits below the menu bar instead of hugging the notch." : "This display has no notch, so Gitoken uses the floating pill.")
             }
+            KeyboardSettingsSection()
+            SavedRepliesSettingsSection()
+            section("General") {
+                card {
+                    row("Launch at login", detail: loginDetail) {
+                        Toggle("Launch at login", isOn: Binding(get: { loginStatus == .enabled }, set: { setLaunchAtLogin($0) }))
+                            .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    }
+                    row("Quit Gitoken", last: true) {
+                        Button("Quit") { NSApp.terminate(nil) }
+                            .buttonStyle(SmallButtonStyle(theme: theme, tint: theme.danger))
+                    }
+                }
+                if loginStatus == .requiresApproval {
+                    Button("Open Login Items Settings…") { SMAppService.openSystemSettingsLoginItems() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(theme.accent)
+                        .padding(.top, 6)
+                        .padding(.horizontal, 4)
+                }
+            }
 
+            #if DEBUG
+            DebugSettingsSection(width: width)
+            #endif
+        }
+    }
+
+    private var notificationSettings: some View {
+        let store = model.store
+        let s = store.settings
+        return VStack(alignment: .leading, spacing: 0) {
+            NotificationTypesSettingsSection()
             section("Sound") {
                 card {
                     row("Arrival sound") {
@@ -153,44 +231,7 @@ struct SettingsView: View {
                         .padding(.horizontal, 4)
                 }
             }
-
-            InboxSettingsSections()
-
-            ShelfSettingsSection()
-
-            OpenLocallySettingsSection()
-
-            section("General") {
-                card {
-                    row("Launch at login", detail: loginDetail) {
-                        Toggle("Launch at login", isOn: Binding(get: { loginStatus == .enabled }, set: { setLaunchAtLogin($0) }))
-                            .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                    }
-                    row("Quit Gitoken", last: true) {
-                        Button("Quit") { NSApp.terminate(nil) }
-                            .buttonStyle(SmallButtonStyle(theme: theme, tint: theme.danger))
-                    }
-                }
-                if loginStatus == .requiresApproval {
-                    Button("Open Login Items Settings…") { SMAppService.openSystemSettingsLoginItems() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(theme.accent)
-                        .padding(.top, 6)
-                        .padding(.horizontal, 4)
-                }
-            }
-
-            #if DEBUG
-            DebugSettingsSection(width: width)
-            #endif
-
-            Text(footer)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity)
-                .multilineTextAlignment(.center)
-                .padding(.top, 14)
+            MutedSettingsSection()
         }
     }
 
@@ -253,11 +294,6 @@ struct SettingsView: View {
         return text
     }
 
-    private func preset(_ s: AppSettings) -> Appearance? {
-        if s.appearance == .calm && s.motion == .gentle { return .calm }
-        if s.appearance == .fluid && s.motion == .elastic { return .fluid }
-        return nil
-    }
 
     private func section<C: View>(_ title: String, first: Bool = false, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {

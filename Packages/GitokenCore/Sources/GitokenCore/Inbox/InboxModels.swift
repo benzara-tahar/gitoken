@@ -68,7 +68,7 @@ public struct Arrival: Identifiable, Equatable, Sendable {
         case snoozeEnded(groupID: ThreadID)
         /// Shown when global snooze / quiet mode / quiet hours end and activity was collected meanwhile.
         case summary(updates: Int, groups: Int, actors: [Actor], endedReason: QuietReason)
-        /// Replaces `.summary` when scheduled quiet hours end: overnight activity by repo plus PR Shelf changes.
+        /// Replaces `.summary` when scheduled quiet hours end: overnight activity by repository.
         case morningSummary(MorningSummary)
     }
 
@@ -94,7 +94,7 @@ public struct Arrival: Identifiable, Equatable, Sendable {
     }
 }
 
-/// "Overnight: N updates in M conversations", grouped by repository, plus what changed on the PR Shelf.
+/// "Overnight: N updates in M conversations", grouped by repository.
 public struct MorningSummary: Equatable, Sendable {
     public struct RepoUpdates: Equatable, Sendable {
         public let repo: RepoRef
@@ -111,19 +111,16 @@ public struct MorningSummary: Equatable, Sendable {
     public let conversations: Int
     /// Busiest repositories first, at most `maxRepos`.
     public let topRepos: [RepoUpdates]
-    /// PR Shelf changes overnight, e.g. "#142 is ready to merge".
-    public let shelfChanges: [String]
     public let actors: [Actor]
 
-    public init(updates: Int, conversations: Int, topRepos: [RepoUpdates], shelfChanges: [String], actors: [Actor]) {
+    public init(updates: Int, conversations: Int, topRepos: [RepoUpdates], actors: [Actor]) {
         self.updates = updates
         self.conversations = conversations
         self.topRepos = topRepos
-        self.shelfChanges = shelfChanges
         self.actors = actors
     }
 
-    public var isEmpty: Bool { updates == 0 && shelfChanges.isEmpty }
+    public var isEmpty: Bool { updates == 0 }
 }
 
 public struct ConversationState: Equatable, Sendable {

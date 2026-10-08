@@ -8,7 +8,7 @@ public final class GitHubClient: GitHubService {
 
     let tokens: any TokenProvider
     let session: URLSession
-    private let now: any NowProvider
+    let now: any NowProvider
 
     public init(tokens: any TokenProvider, session: URLSession = .shared, now: any NowProvider = SystemNow()) {
         self.tokens = tokens

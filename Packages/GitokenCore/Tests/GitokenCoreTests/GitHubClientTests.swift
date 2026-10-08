@@ -398,7 +398,7 @@ private func thread(kind: SubjectKind, number: Int?, repo: String = "web") -> No
 }
 
 /// Hands out `token-<invalidations>` so tests can see which token a request used.
-private final class StubTokens: TokenProvider {
+final class StubTokens: TokenProvider {
     private let state = Mutex(0)
     private let failure: AuthError?
 
@@ -414,14 +414,15 @@ private final class StubTokens: TokenProvider {
     func invalidate() async { state.withLock { $0 += 1 } }
 }
 
-private struct StubReply: Sendable {
+struct StubReply: Sendable {
     var status: Int
     var headers: [String: String] = [:]
     var body = Data()
 }
 
 /// Installs a handler on `StubURLProtocol` for the lifetime of a test and records every request.
-private final class StubServer: Sendable {
+/// Shared process-wide: tests using it belong to the serialized `GitHubClientTests` suite (extensions included).
+final class StubServer: Sendable {
     let session: URLSession
 
     init(_ handler: @escaping @Sendable (URLRequest) -> StubReply) {
@@ -434,7 +435,7 @@ private final class StubServer: Sendable {
     var requests: [URLRequest] { StubURLProtocol.state.withLock { $0.requests } }
 }
 
-private final class StubURLProtocol: URLProtocol {
+final class StubURLProtocol: URLProtocol {
     static let state = Mutex<(handler: (@Sendable (URLRequest) -> StubReply)?, requests: [URLRequest])>((nil, []))
 
     override class func canInit(with request: URLRequest) -> Bool { true }

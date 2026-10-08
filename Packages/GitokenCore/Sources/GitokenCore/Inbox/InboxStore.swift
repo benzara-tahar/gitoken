@@ -34,13 +34,12 @@ public final class InboxStore {
 
     /// Non-nil only for `preview()` stores: the debug menu drives scripted arrivals through it, then calls `refresh()`.
     public private(set) var fixtureService: FixtureGitHubService?
-    /// Set by `makeShelfStore()`.
-    public internal(set) var shelfStore: ShelfStore?
-    /// PR Shelf changes since quiet hours began, e.g. "#142 is ready to merge". Called once, when the morning summary is
-    /// published; set by `makeShelfStore()`.
-    @ObservationIgnored public var overnightShelfLines: (@MainActor () -> [String])?
+    /// Set by `makeFilePreviewStore()`.
+    public internal(set) var filePreviewStore: FilePreviewStore?
 
     public let now: any NowProvider
+    public let customSections: CustomSectionStore
+
 
     /// Starts the poll loop: poll immediately, then sleep max(X-Poll-Interval, 60s) with tolerance.
     public func start() {
@@ -106,7 +105,7 @@ public final class InboxStore {
             row.snoozedUntil = nil
             row.resurfaced = .snoozeEnded
             changed.append(row)
-            if currentQuietReason == nil, !settings.muteRules.mutes(row.thread) {
+            if currentQuietReason == nil, settings.presents(row.thread) {
                 arrivals.enqueue(Arrival(kind: .snoozeEnded(groupID: row.id), updateCount: 1, actors: row.actors))
             }
         }
@@ -120,7 +119,7 @@ public final class InboxStore {
     public private(set) var lastSyncAt: Date?
     public private(set) var lastSyncError: GitHubError?
 
-    /// All in-scope, unmuted groups, newest activity first.
+    /// All tracked groups allowed by notification types and mute rules, newest activity first.
     public private(set) var groups: [InboxGroup] = []
     public func groups(in bucket: InboxBucket) -> [InboxGroup] {
         let current = now.now()
@@ -136,9 +135,11 @@ public final class InboxStore {
         change(&next)
         guard next != settings else { return }
         let reanalyze = next.notifyAIReviews != settings.notifyAIReviews
-        let muteChanged = next.muteRules != settings.muteRules
+        let filtersChanged = next.muteRules != settings.muteRules
+            || next.enabledNotificationReasons != settings.enabledNotificationReasons
         settings = next
-        if muteChanged { applyMuteRules() }
+        if filtersChanged { applyPresentationFilters() }
+        customSections.configure(sections: next.customSections)
         saveAppState()
         syncQuietState()
         if reanalyze { reabsorbCachedDetails() }
@@ -154,10 +155,10 @@ public final class InboxStore {
         updateSettings { $0.muteRules.removeAll { $0 == rule } }
     }
 
-    private func applyMuteRules() {
-        let muted = Set(rows.values.filter { settings.muteRules.mutes($0.thread) }.map(\.id))
-        for id in muted { arrivals.remove(groupID: id) }
-        collected.remove(muted)
+    private func applyPresentationFilters() {
+        let excluded = Set(rows.values.filter { !settings.presents($0.thread) }.map(\.id))
+        arrivals.remove(excluded)
+        collected.remove(excluded)
         rebuildGroups()
         publishArrival()
     }
@@ -188,6 +189,11 @@ public final class InboxStore {
     }
 
     public private(set) var conversations: [ThreadID: ConversationState] = [:]
+
+    /// Open conversation detail, else the cached one. Never hits the network.
+    public func detail(for id: ThreadID) -> ThreadDetail? {
+        conversations[id]?.detail ?? account.flatMap { cachedDetail(id, account: $0) }
+    }
 
     // MARK: Intents
 
@@ -386,6 +392,7 @@ public final class InboxStore {
         self.now = now
         self.tokens = tokens
         self.calendar = calendar
+        customSections = CustomSectionStore(service: service as? any GitHubSearchService, database: database, now: now)
 
         let saved: PersistedAppState
         do {
@@ -395,6 +402,7 @@ public final class InboxStore {
             saved = PersistedAppState()
         }
         settings = saved.settings
+        customSections.configure(sections: saved.settings.customSections)
         manualQuiet = saved.manualQuiet
         globalSnoozeUntil = saved.globalSnoozeUntil
         lastModified = saved.lastModified
@@ -404,9 +412,10 @@ public final class InboxStore {
             self.viewer = viewer
             phase = .ready(viewer: viewer)
             rows = loadRows(for: AccountKey(login: viewer.login))
+            customSections.setAccount(AccountKey(login: viewer.login))
         }
+        applyPresentationFilters()
         syncQuietState(live: false)
-        rebuildGroups()
     }
 
     private var account: AccountKey? { viewer.map { AccountKey(login: $0.login) } }
@@ -501,6 +510,7 @@ public final class InboxStore {
         let previous = viewer
         viewer = fetched
         phase = .ready(viewer: fetched)
+        customSections.setAccount(AccountKey(login: fetched.login))
         if previous?.login.caseInsensitiveCompare(fetched.login) != .orderedSame {
             // First run or the gh account changed: everything below is per-account.
             if previous != nil {
@@ -594,21 +604,20 @@ public final class InboxStore {
                 Self.log.error("Deleting threads failed: \(String(describing: error), privacy: .public)")
             }
         }
-        rebuildGroups()
-        publishArrival()
+        applyPresentationFilters()
         return changes
     }
 
     /// Hydrates every announceable change plus a bounded backfill of rows never hydrated, then folds the timelines
     /// into the rows. Returns the details fetched this round.
     private func hydrate(_ changes: [ThreadChange], account: AccountKey, viewer: Actor) async -> [ThreadID: ThreadDetail] {
-        let muteRules = settings.muteRules
+        let policy = settings
         let urgentIDs = changes.filter(\.announce).map(\.id)
-        let urgent = urgentIDs.compactMap { rows[$0] }.filter { $0.needsHydration && !muteRules.mutes($0.thread) }
+        let urgent = urgentIDs.compactMap { rows[$0] }.filter { $0.needsHydration && policy.presents($0.thread) }
         let urgentSet = Set(urgentIDs)
-        // Muted rows stay unhydrated until unmuted; the next poll's backfill catches them up.
+        // Excluded rows stay tracked; the next poll's backfill catches them up after re-enabling.
         let backfill = rows.values
-            .filter { !urgentSet.contains($0.id) && $0.doneAt == nil && $0.needsHydration && !muteRules.mutes($0.thread) }
+            .filter { !urgentSet.contains($0.id) && $0.doneAt == nil && $0.needsHydration && policy.presents($0.thread) }
             .sorted { a, b in
                 a.isUnseen != b.isUnseen ? a.isUnseen : a.thread.updatedAt > b.thread.updatedAt
             }
@@ -644,7 +653,7 @@ public final class InboxStore {
         var collectedChanged = false
         for change in changes where change.announce {
             guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current),
-                  !settings.muteRules.mutes(row.thread) else { continue }
+                  settings.presents(row.thread) else { continue }
             let includeAI = settings.notifyAIReviews
             let fresh = details[change.id].map {
                 ActivityAnalysis.items(in: $0, byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
@@ -721,8 +730,8 @@ public final class InboxStore {
 
     /// Tracks quiet transitions. Entering quiet folds waiting arrivals into the collected summary and hides the
     /// current one; leaving quiet publishes the summary if anything was collected (also after a relaunch).
-    /// When scheduled quiet hours end, a morning summary replaces it; that one waits for a `live` call while the Mac is
-    /// in use (not during init, which runs before the PR Shelf is wired, nor while asleep/locked), so it is seen.
+    /// When scheduled quiet hours end, a morning summary waits until the Mac is in use rather than publishing
+    /// during initialization or while asleep/locked.
     private func syncQuietState(live: Bool = true) {
         let reason = QuietPolicy.reason(
             now: now.now(), globalSnoozeUntil: globalSnoozeUntil, manualQuiet: manualQuiet,
@@ -746,7 +755,7 @@ public final class InboxStore {
                 if morning {
                     publishMorningSummary()
                 } else if !collected.isEmpty {
-                    arrivals.enqueue(collected.summary(endedReason: endedReason))
+                    arrivals.enqueue(collected.summary(endedReason: endedReason), collected: collected)
                 }
                 collected = CollectedActivity()
                 collectedReason = nil
@@ -759,12 +768,15 @@ public final class InboxStore {
     }
 
     private func publishMorningSummary() {
-        let muteRules = settings.muteRules
-        let summary = collected.morningSummary(
-            repo: { id in self.rows[id].flatMap { muteRules.mutes($0.thread) ? nil : $0.thread.repo } },
-            shelfChanges: overnightShelfLines?() ?? [])
+        let repos = Dictionary(uniqueKeysWithValues: collected.groupIDs.compactMap { id -> (ThreadID, RepoRef)? in
+            guard let row = rows[id], settings.presents(row.thread) else { return nil }
+            return (id, row.thread.repo)
+        })
+        let summary = collected.morningSummary(repo: { repos[$0] })
         guard !summary.isEmpty else { return }
-        arrivals.enqueue(Arrival(kind: .morningSummary(summary), updateCount: 1, actors: summary.actors))
+        arrivals.enqueue(
+            Arrival(kind: .morningSummary(summary), updateCount: 1, actors: summary.actors),
+            collected: collected, repos: repos)
     }
 
     private func publishArrival() {
@@ -803,8 +815,7 @@ public final class InboxStore {
     }
 
     private func rebuildGroups() {
-        let muteRules = settings.muteRules
-        let next = rows.values.filter { !muteRules.mutes($0.thread) }.map(\.group).sorted { a, b in
+        let next = rows.values.filter { settings.presents($0.thread) }.map(\.group).sorted { a, b in
             a.lastActivityAt != b.lastActivityAt ? a.lastActivityAt > b.lastActivityAt : a.id.rawValue < b.id.rawValue
         }
         if next != groups { groups = next }

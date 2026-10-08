@@ -272,7 +272,7 @@ import Testing
         #expect(h.store.quietReason == nil)
         let summary = try #require(h.store.arrival)
         #expect(summary.kind == .morningSummary(MorningSummary(
-            updates: 3, conversations: 2, topRepos: [.init(repo: repo, updates: 3)], shelfChanges: [],
+            updates: 3, conversations: 2, topRepos: [.init(repo: repo, updates: 3)],
             actors: [sarah, omar, lea])), "the morning summary replaces the generic quiet-hours summary")
 
         h.store.dismissArrival()
@@ -366,6 +366,53 @@ import Testing
 
     // MARK: Auth
 
+    @Test(arguments: [
+        AuthError.ghNotInstalled(searched: ["/nonexistent/gh"]),
+        .notLoggedIn(detail: "no oauth token"),
+        .tokenRejected(status: 401, scopes: nil)
+    ])
+    func retryRechecksAuthAndRestoresFreshAndCachedInboxes(_ error: AuthError) async throws {
+        var h = try Harness()
+        let tokens = StubTokens()
+        h.store = InboxStore(service: h.github, database: h.database, now: h.clock, tokens: tokens, calendar: utc)
+        #expect(h.store.phase == .starting)
+        h.github.update { $0.viewer = .failure(.auth(error)) }
+
+        await h.store.refresh()
+        #expect(h.store.phase == .blocked(error))
+        #expect(tokens.invalidations == 1)
+        #expect(h.github.update { $0.pollLastModified }.isEmpty)
+        await h.store.refresh()
+        #expect(h.store.phase == .blocked(error))
+        #expect(tokens.invalidations == 2)
+
+        h.github.update { $0.viewer = .success(me) }
+        h.github.add("1", at: t0 - 600)
+        await h.store.refresh()
+        #expect(h.store.phase == .ready(viewer: me))
+        #expect(h.store.lastSyncError == nil)
+        #expect(h.store.lastSyncAt == h.now)
+        #expect(h.store.groups.count == 1)
+        #expect(tokens.invalidations == 3)
+
+        let relaunched = InboxStore(
+            service: h.github, database: h.database, now: h.clock, tokens: tokens, calendar: utc)
+        #expect(relaunched.phase == .ready(viewer: me), "a cached viewer is not a fresh auth check")
+        #expect(relaunched.lastSyncAt == nil)
+        h.github.update { $0.viewer = .failure(.auth(error)) }
+        await relaunched.refresh()
+        #expect(relaunched.phase == .blocked(error))
+        #expect(relaunched.groups.count == 1, "auth failure keeps the cached inbox")
+        #expect(tokens.invalidations == 4)
+
+        h.github.update { $0.viewer = .success(me) }
+        await relaunched.refresh()
+        #expect(relaunched.phase == .ready(viewer: me))
+        #expect(relaunched.lastSyncError == nil)
+        #expect(relaunched.groups.count == 1)
+        #expect(tokens.invalidations == 5)
+    }
+
     @Test func authErrorsBlockUntilRefreshSucceeds() async throws {
         let h = try Harness()
         h.github.update { $0.viewer = .failure(.auth(.notLoggedIn(detail: "no oauth token"))) }
@@ -383,6 +430,12 @@ import Testing
         await h.store.refresh()
         #expect(h.store.phase == .blocked(.tokenRejected(status: 401, scopes: nil)))
         #expect(h.store.groups.count == 1, "cached inbox stays")
+
+        h.github.update { $0.pollError = nil }
+        await h.store.refresh()
+        #expect(h.store.phase == .ready(viewer: me))
+        #expect(h.store.lastSyncError == nil)
+        #expect(h.store.groups.count == 1)
     }
 
     // MARK: Conversation

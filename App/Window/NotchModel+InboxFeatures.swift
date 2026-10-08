@@ -13,9 +13,11 @@ extension NotchModel {
             return
         }
         guard !hiddenForFullscreen else { return }
-        open(.list)
-        let rows = Buckets(store: store, now: store.now.now()).visible(showSnoozed: showSnoozed, showDone: showDone)
-        if !rows.contains(where: { $0.id == selectedRow }) { selectedRow = rows.first?.id }
+        reopen()
+        if route == .list {
+            let rows = keyboardRows
+            if listSelection.map({ rows.contains($0) }) != true { selectListRow(rows.first) }
+        }
     }
 
     // MARK: Mute
@@ -41,17 +43,11 @@ extension NotchModel {
         }
     }
 
-    // MARK: Open locally
+    // MARK: Pull request previews
 
     func pullRequestRef(_ g: InboxGroup) -> PullRequestRef? {
         guard g.thread.kind == .pullRequest, let number = g.thread.number else { return nil }
         return PullRequestRef(repo: g.thread.repo, number: number)
-    }
-
-    func openPullRequestLocally(_ g: InboxGroup) {
-        guard let ref = pullRequestRef(g) else { return }
-        let headRefName = shelf.status(for: ref)?.headRefName ?? ""
-        Task { await openLocally.open(repo: ref.repo, number: ref.number, headRefName: headRefName) }
     }
 }
 

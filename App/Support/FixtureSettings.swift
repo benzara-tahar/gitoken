@@ -4,7 +4,7 @@ import GitokenCore
 import os
 
 /// `--fixtures` launches use an in-memory database so fixture threads start fresh every time; this keeps their
-/// Settings (appearance, PR Shelf corner, …) across relaunches in a separate JSON file instead.
+/// settings (appearance, notifications, …) across relaunches in a separate JSON file instead.
 @MainActor
 final class FixtureSettingsPersistence {
     private let store: InboxStore
