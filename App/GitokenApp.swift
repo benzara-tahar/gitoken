@@ -14,7 +14,7 @@ struct GitokenApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: InboxStore?
     private var notch: NotchController?
-    private var shelf: ShelfController?
+    private var preview: PreviewController?
     private var power: PowerObserver?
     #if DEBUG
     private var fixtureSettings: FixtureSettingsPersistence?
@@ -28,11 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         let notch = NotchController(store: store)
         self.notch = notch
-        shelf = ShelfController(notch: notch.model)
-        let shelfStore = notch.model.shelf
+        preview = PreviewController(notch: notch.model, notchWindow: notch.window)
         power = PowerObserver(
-            onPause: { store.pause(); shelfStore.pause() },
-            onResume: { store.resume(); shelfStore.resume() }
+            onPause: { store.pause() },
+            onResume: { store.resume() }
         )
         store.start()
     }

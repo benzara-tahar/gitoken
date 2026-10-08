@@ -7,23 +7,16 @@ enum Format {
         date.formatted(date: .omitted, time: .shortened)
     }
 
-    /// Compact relative age for list rows: "now", "5m", "2h", "3d", then a date.
+    /// Elapsed ages never round into the next unit; future timestamps tolerate clock skew.
     static func ago(_ date: Date, now: Date) -> String {
-        let d = now.timeIntervalSince(date)
-        if d < 45 { return "now" }
-        if d < 3600 { return "\(max(1, Int((d / 60).rounded())))m" }
-        if d < 86400 { return "\(Int((d / 3600).rounded()))h" }
-        if d < 7 * 86400 { return "\(Int((d / 86400).rounded()))d" }
-        return date.formatted(.dateTime.month(.abbreviated).day())
-    }
-
-    /// Timeline stamp: time today, "Yesterday 2:20 PM", otherwise "Mar 3".
-    static func stamp(_ date: Date, now: Date, calendar: Calendar = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return time(date) }
-        if let y = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: y) {
-            return "Yesterday \(time(date))"
-        }
-        return date.formatted(.dateTime.month(.abbreviated).day())
+        let seconds = max(0, now.timeIntervalSince(date))
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))min ago" }
+        if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
+        if seconds < 7 * 86400 { return "\(Int(seconds / 86400))d ago" }
+        if seconds < 30 * 86400 { return "\(Int(seconds / (7 * 86400)))w ago" }
+        if seconds < 365 * 86400 { return "\(Int(seconds / (30 * 86400)))mo ago" }
+        return "\(Int(seconds / (365 * 86400)))y ago"
     }
 
     /// "2:50 PM", "tomorrow 9:00 AM", or "Mon 9:00 AM" relative to `now`.

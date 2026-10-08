@@ -19,6 +19,9 @@ struct BlockedView: View {
                 IconButton(symbol: "slider.horizontal.3", label: "Settings") { model.open(.settings) }
             }
             VStack(alignment: .leading, spacing: 12) {
+                BrandLogo(width: 132)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
                 HStack(spacing: 10) {
                     Image(systemName: "terminal")
                         .font(.system(size: 16, weight: .semibold))
@@ -27,7 +30,7 @@ struct BlockedView: View {
                         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.warn.opacity(0.14)))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title).font(.system(size: 14, weight: .semibold))
-                        Text("Gitoken signs in with the GitHub CLI.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        Text("Gitoken uses your GitHub CLI sign-in.").font(.system(size: 11.5)).foregroundStyle(.secondary)
                     }
                 }
                 Text(error.instructions)
@@ -50,6 +53,10 @@ struct BlockedView: View {
                 .padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.codeBackground))
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.hairline, lineWidth: 0.5))
+                Text("Gitoken does not run these commands or require a separate token.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let detail {
                     Text(detail).font(.system(size: 11)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -107,11 +114,14 @@ struct StartingView: View {
             } trailing: {
                 EmptyView()
             }
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Connecting to GitHub…").font(.system(size: 12)).foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+                InboxIllustration(.starting, size: 88)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Connecting to GitHub…").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
-            .padding(.vertical, 28)
+            .padding(.vertical, 20)
         }
         .frame(width: width)
     }

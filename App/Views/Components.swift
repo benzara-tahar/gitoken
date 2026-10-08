@@ -295,9 +295,10 @@ struct SurfaceHeader<Leading: View, Trailing: View>: View {
     }
 }
 
-/// "‹ Inbox [n]" back control.
+/// Back control with an optional unseen badge.
 struct BackButton: View {
     @Environment(\.theme) private var theme
+    var title = "Inbox"
     var badge: Int = 0
     var action: () -> Void
     @State private var hovering = false
@@ -306,7 +307,7 @@ struct BackButton: View {
         Button(action: action) {
             HStack(spacing: 2) {
                 Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
-                Text("Inbox").font(.system(size: 13, weight: .semibold))
+                Text(title).font(.system(size: 13, weight: .semibold))
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 10, weight: .bold))
@@ -326,8 +327,8 @@ struct BackButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .accessibilityLabel(badge > 0 ? "Back to inbox, \(badge) other unseen" : "Back to inbox")
-        .help("Back to inbox")
+        .accessibilityLabel(badge > 0 ? "Back to \(title.lowercased()), \(badge) other unseen" : "Back to \(title.lowercased())")
+        .help("Back to \(title.lowercased())")
     }
 }
 

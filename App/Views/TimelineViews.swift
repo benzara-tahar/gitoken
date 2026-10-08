@@ -383,7 +383,7 @@ struct TimeStamp: View {
     var now: Date
 
     var body: some View {
-        Text(Format.stamp(date, now: now))
+        Text(Format.ago(date, now: now))
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(.tertiary)
@@ -425,6 +425,7 @@ private struct HighlightBox: View {
 
 /// A standalone review comment (or a reply in a review thread) as its own timeline row.
 private struct ReviewCommentRow: View {
+    @Environment(NotchModel.self) private var model
     let comment: ReviewComment
     let context: TimelineContext
 
@@ -432,7 +433,7 @@ private struct ReviewCommentRow: View {
         let parent = comment.replyToID.flatMap { context.reviewComments[$0] }
         FullEventRow(actor: comment.author, date: comment.createdAt, context: context) {
             Text(parent == nil ? "on" : "replied on")
-            FileChip(path: comment.path)
+            FileChip(path: comment.path) { model.openPreview(comment, in: context.group) }
         } content: {
             ReviewCommentBody(comment: comment, parent: parent, context: context)
         }
@@ -441,6 +442,7 @@ private struct ReviewCommentRow: View {
 
 /// A review comment nested under a review header.
 private struct ReviewCommentBlock: View {
+    @Environment(NotchModel.self) private var model
     let comment: ReviewComment
     let context: TimelineContext
     var showsAuthor: Bool
@@ -452,7 +454,7 @@ private struct ReviewCommentBlock: View {
                 HStack(spacing: 5) {
                     if showsAuthor { Text(comment.author.displayName).fontWeight(.semibold).foregroundStyle(.primary) }
                     Text(parent == nil ? "on" : "replied on")
-                    FileChip(path: comment.path)
+                    FileChip(path: comment.path) { model.openPreview(comment, in: context.group) }
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -499,27 +501,50 @@ private struct ReviewCommentBody: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Reply in thread to \(comment.author.displayName)")
+                if model.pullRequestRef(context.group) != nil {
+                    Button {
+                        model.openPreview(comment, in: context.group)
+                    } label: {
+                        Label("Preview", systemImage: "doc.text.magnifyingglass")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 6)
+                            .frame(height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Preview \(comment.path) with this comment")
+                    .accessibilityLabel("Preview \(Format.basename(comment.path)) with this comment")
+                }
                 ReactionBar(subjectID: comment.id, reactions: comment.reactions, groupID: context.group.id)
             }
         }
+        .onHover { if $0 { model.prefetchPreview(comment, in: context.group) } }
     }
 }
 
+/// The commented file's name; clicking opens the file preview.
 private struct FileChip: View {
     @Environment(\.theme) private var theme
     var path: String
+    var action: () -> Void
 
     var body: some View {
-        Text(Format.basename(path))
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, 5)
-            .background(RoundedRectangle(cornerRadius: 4).fill(theme.chipBackground))
-            .frame(maxWidth: 200, alignment: .leading)
-            .fixedSize()
-            .help(path)
+        Button(action: action) {
+            Text(Format.basename(path))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 5)
+                .background(RoundedRectangle(cornerRadius: 4).fill(theme.chipBackground))
+                .frame(maxWidth: 200, alignment: .leading)
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Preview \(path)")
+        .accessibilityLabel("Preview \(Format.basename(path))")
     }
 }
 

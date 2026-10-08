@@ -1,16 +1,55 @@
 import GitokenCore
 import SwiftUI
 
-/// Global shortcut + inbox keys, mute rules, and saved replies.
-struct InboxSettingsSections: View {
+struct NotificationTypesSettingsSection: View {
+    @Environment(NotchModel.self) private var model
+
     var body: some View {
-        KeyboardSettingsSection()
-        MutedSettingsSection()
-        SavedRepliesSettingsSection()
+        let reasons = NotificationReason.allCases.filter(\.isInInboxScope)
+        SettingsSection(title: "Notification types") {
+            SettingsCard {
+                ForEach(Array(reasons.enumerated()), id: \.element) { index, reason in
+                    SettingsRow(title: title(reason), last: index == reasons.count - 1) {
+                        Toggle(title(reason), isOn: Binding(
+                            get: { model.settings.enabledNotificationReasons.contains(reason) },
+                            set: { enabled in
+                                model.store.updateSettings { settings in
+                                    if enabled {
+                                        settings.enabledNotificationReasons.insert(reason)
+                                    } else {
+                                        settings.enabledNotificationReasons.remove(reason)
+                                    }
+                                }
+                            }))
+                            .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    }
+                }
+            }
+            SettingsNote(text: "Excluded types stay out of the inbox, badge, arrivals and summaries. They remain tracked locally; GitHub read and done state is unchanged.")
+        }
+    }
+
+    private func title(_ reason: NotificationReason) -> String {
+        switch reason {
+        case .reviewRequested: "Review requests"
+        case .mention: "Mentions"
+        case .teamMention: "Team mentions"
+        case .author: "Your threads"
+        case .comment: "Comments"
+        case .assign: "Assignments"
+        case .stateChange: "State changes"
+        case .manual: "Following"
+        case .subscribed: "Subscriptions"
+        case .ciActivity: "CI activity"
+        case .securityAlert: "Security alerts"
+        case .invitation: "Invitations"
+        case .approvalRequested: "Approval requests"
+        case .other: "Other"
+        }
     }
 }
 
-private struct KeyboardSettingsSection: View {
+struct KeyboardSettingsSection: View {
     @Environment(NotchModel.self) private var model
     @Environment(\.theme) private var theme
 
@@ -66,7 +105,7 @@ private struct KeyboardSettingsSection: View {
     }
 }
 
-private struct MutedSettingsSection: View {
+struct MutedSettingsSection: View {
     @Environment(NotchModel.self) private var model
     @Environment(\.theme) private var theme
 
@@ -91,7 +130,7 @@ private struct MutedSettingsSection: View {
     }
 }
 
-private struct SavedRepliesSettingsSection: View {
+struct SavedRepliesSettingsSection: View {
     @Environment(NotchModel.self) private var model
     @Environment(\.theme) private var theme
 

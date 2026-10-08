@@ -70,7 +70,8 @@ import Testing
         state.globalSnoozeUntil = t0 + 0.5
         state.lastModified = "Fri, 02 Oct 2026 13:59:00 GMT"
         state.viewer = me
-        state.collected = CollectedActivity(updates: 5, groupIDs: [ThreadID("1"), ThreadID("2")], actors: [sarah, lea])
+        state.collected.add(groupID: ThreadID("1"), count: 3, actors: [sarah])
+        state.collected.add(groupID: ThreadID("2"), count: 2, actors: [lea])
         state.collectedReason = .quietHours(until: .init(hour: 7, minute: 15))
         try db.save(state)
         #expect(try db.appState() == state)
@@ -79,6 +80,42 @@ import Testing
         state.viewer = nil
         try db.save(state)
         #expect(try db.appState() == state, "single row is overwritten")
+    }
+
+    @Test func removalMigrationPreservesInboxAndDropsRetiredTables() throws {
+        let queue = try DatabaseQueue()
+        try GitokenDatabase.migrator.migrate(queue, upTo: "v3-pr-shelf")
+        let row = fullyPopulatedRow()
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO thread (accountHost, accountLogin, id, thread, updatedAt, unread, state, actors,
+                    unseenCount, keptLocally) VALUES (?, ?, ?, ?, ?, 1, 'open', '[]', 0, 0)
+                    """,
+                arguments: [
+                    account.host, account.login, row.id.rawValue,
+                    String(decoding: try JSONEncoder().encode(row.thread), as: UTF8.self),
+                    row.thread.updatedAt.timeIntervalSinceReferenceDate,
+                ])
+            try db.execute(
+                sql: "INSERT INTO shelfPin VALUES (?, ?, 'platform', 'web', 42, 0)",
+                arguments: [account.host, account.login])
+            try db.execute(
+                sql: "INSERT INTO shelfStatus VALUES (?, ?, 'platform', 'web', 42, '{}', 1)",
+                arguments: [account.host, account.login])
+            try db.execute(
+                sql: "INSERT INTO shelfEvent VALUES (?, ?, 'event', '{}', 0)",
+                arguments: [account.host, account.login])
+        }
+        let migrated = try GitokenDatabase(queue: queue)
+        #expect(try migrated.threads(for: account).map(\.thread) == [row.thread])
+        try queue.read { db throws in
+            for table in ["shelfPin", "shelfStatus", "shelfEvent"] {
+                #expect(try !db.tableExists(table))
+            }
+            #expect(try db.tableExists("threadDetail"))
+            #expect(try db.tableExists("appState"))
+        }
     }
 
     @Test func richBodiesMigrationDropsOldDetailsAndCleansSnippets() throws {

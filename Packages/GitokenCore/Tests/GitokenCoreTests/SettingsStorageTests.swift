@@ -17,6 +17,29 @@ import Testing
             launchAtLogin: true, sound: .drop, soundVolume: 0.35, aiReviews: .collapse, notifyAIReviews: false))
     }
 
+    @Test func obsoleteLocalSettingsAreIgnoredAndNotSavedAgain() throws {
+        let db = try GitokenDatabase.inMemory()
+        try db.save(PersistedAppState())
+        let legacy = """
+            {"appearance":"fluid","motion":"reduced","savedReplies":["Thanks!"],"hotKey":null,
+             "editor":{"custom":{"template":"code {path}"}},"worktreeRoot":"~/Worktrees",
+             "repoPaths":{"platform/web":"/Users/test/code/web"},"cloneSearchRoots":["~/code"]}
+            """
+        try db.queue.write { try $0.execute(sql: "UPDATE appState SET settings = ?", arguments: [legacy]) }
+
+        var state = try #require(try db.appState())
+        #expect(state.settings == AppSettings(
+            appearance: .fluid, motion: .reduced, hotKey: nil, savedReplies: ["Thanks!"]))
+        state.settings.sound = .chime
+        try db.save(state)
+        #expect(try db.appState()?.settings == state.settings)
+        let encoded = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(state.settings)) as? [String: Any])
+        for key in ["editor", "worktreeRoot", "repoPaths", "cloneSearchRoots"] {
+            #expect(encoded[key] == nil)
+        }
+    }
+
     @Test func soundAndAIReviewChoicesRoundTrip() throws {
         let db = try GitokenDatabase.inMemory()
         var state = PersistedAppState()
@@ -26,5 +49,28 @@ import Testing
         state.settings.notifyAIReviews = true
         try db.save(state)
         #expect(try db.appState()?.settings == state.settings)
+    }
+
+    @Test(arguments: [
+        Set<NotificationReason>(),
+        Set<NotificationReason>([.mention, .reviewRequested]),
+        Set(NotificationReason.allCases),
+    ])
+    func notificationReasonAllowlistRoundTripsWithoutChangingOtherChoices(
+        _ reasons: Set<NotificationReason>
+    ) throws {
+        let db = try GitokenDatabase.inMemory()
+        var state = PersistedAppState()
+        state.settings.enabledNotificationReasons = reasons
+        state.settings.notifyAIReviews = true
+        state.settings.muteRules = [.repository("acme/web")]
+        try db.save(state)
+        #expect(try db.appState()?.settings == state.settings)
+    }
+
+    @Test func absentNotificationReasonAllowlistEnablesEveryReason() throws {
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"notifyAIReviews":false}"#.utf8))
+        #expect(settings.enabledNotificationReasons == Set(NotificationReason.allCases))
+        #expect(!settings.notifyAIReviews)
     }
 }

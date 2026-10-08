@@ -13,11 +13,11 @@ public enum AuthError: Error, Equatable, Sendable {
     public var instructions: String {
         switch self {
         case .ghNotInstalled:
-            return "Install the GitHub CLI (brew install gh), then run gh auth login."
+            return "Install the GitHub CLI in Terminal (brew install gh with Homebrew), then run gh auth login and click Retry."
         case .notLoggedIn:
-            return "Run gh auth login in Terminal, then retry."
+            return "Run gh auth login in Terminal, then click Retry."
         case .tokenRejected:
-            return "GitHub rejected the gh token. Run gh auth login with a classic OAuth login (not a fine-grained token), then retry."
+            return "GitHub rejected the gh token. Run gh auth login in Terminal to sign in again with GitHub’s browser login, then click Retry."
         }
     }
 }

@@ -69,11 +69,16 @@ struct ConversationView: View {
         return SurfaceHeader(width: width) {
             BackButton(badge: others) { model.back() }
         } trailing: {
+            if let g = model.group(id), model.pullRequestRef(g) != nil {
+                IconButton(symbol: "doc.text.magnifyingglass", label: "Files: preview the changed files") {
+                    model.previewController?.showFiles(for: id)
+                }
+            }
             IconButton(
                 symbol: model.pinned ? "pin.fill" : "pin", label: model.pinned ? "Unpin panel" : "Pin panel open",
                 active: model.pinned
             ) { model.pinned.toggle() }
-            IconButton(symbol: "xmark", label: "Close (Esc)") { model.close() }
+            IconButton(symbol: "xmark", label: "Close notch") { model.close() }
         }
     }
 
@@ -104,9 +109,6 @@ struct ConversationView: View {
                 if let checks = detail?.checks { checksChip(checks) }
                 if let review = latestReview(detail) { review }
                 if g.doneAt != nil { Chip(text: "Done", symbol: "checkmark") }
-                if let ref = model.pullRequestRef(g), model.shelf.status(for: ref)?.isReadyToMerge == true {
-                    Chip(text: "Ready to merge", symbol: "arrow.triangle.merge", tone: .success)
-                }
             }
             .padding(.bottom, 10)
 
@@ -124,17 +126,7 @@ struct ConversationView: View {
                 }
                 .menuAnchor($snoozeAnchor)
                 Spacer(minLength: 4)
-                if let ref = model.pullRequestRef(g) {
-                    let opening = model.openLocally.isOpening(ref)
-                    PillButton(title: opening ? "Opening…" : "Open locally", symbol: "laptopcomputer", kind: .ghost) {
-                        model.openPullRequestLocally(g)
-                    }
-                    .disabled(opening)
-                    .help("Check out \(ref.repo.fullName)#\(ref.number) in a worktree or your clone and open it in your editor")
-                    IconButton(symbol: "arrow.up.right.square", label: "Open on GitHub") { model.openOnGitHub(id) }
-                } else {
-                    PillButton(title: "Open on GitHub", symbol: "arrow.up.right.square", kind: .ghost) { model.openOnGitHub(id) }
-                }
+                PillButton(title: "Open on GitHub", symbol: "arrow.up.right.square", kind: .ghost) { model.openOnGitHub(id) }
             }
         }
         .padding(.horizontal, 16)
@@ -501,7 +493,7 @@ struct ComposerView: View {
             HStack {
                 Text("Return to send · Shift-Return for a new line")
                 Spacer()
-                Text("Esc to close")
+                Text("Esc to go back")
             }
             .font(.system(size: 10.5))
             .foregroundStyle(.tertiary)

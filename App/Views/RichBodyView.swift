@@ -222,8 +222,11 @@ private struct RichCodeView: View {
     let code: RichCode
     let style: RichStyleContext
 
+    private typealias LocalHighlight = (spans: [HighlightSpan], lineStarts: [Int])
+
     var body: some View {
         let theme = style.theme
+        let local = localHighlight()
         VStack(alignment: .leading, spacing: 0) {
             if code.isSuggestion {
                 Text("Suggested change")
@@ -236,8 +239,8 @@ private struct RichCodeView: View {
             }
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(code.lines.enumerated()), id: \.offset) { _, line in
-                        lineView(line)
+                    ForEach(Array(code.lines.enumerated()), id: \.offset) { index, line in
+                        lineView(line, at: index, local: local)
                     }
                 }
                 .padding(.vertical, 7)
@@ -250,7 +253,17 @@ private struct RichCodeView: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.hairline, lineWidth: 0.5))
     }
 
-    private func lineView(_ line: RichCodeLine) -> some View {
+    /// GitHub's token classes win; unclassified fenced code with a language is highlighted locally.
+    private func localHighlight() -> LocalHighlight? {
+        guard !code.isHighlighted, let fence = code.language else { return nil }
+        let lines = code.lines.map(\.text)
+        return (
+            CodeHighlighter.spans(lines.joined(separator: "\n"), language: CodeLanguage.detect(fence: fence)),
+            CodeHighlighting.lineStarts(lines)
+        )
+    }
+
+    private func lineView(_ line: RichCodeLine, at index: Int, local: LocalHighlight?) -> some View {
         let theme = style.theme
         let marker = line.change == .added ? "+" : line.change == .removed ? "-" : nil
         return HStack(spacing: 0) {
@@ -259,7 +272,7 @@ private struct RichCodeView: View {
                     .foregroundStyle(line.change == .added ? theme.success : line.change == .removed ? theme.danger : .secondary)
                     .frame(width: 14, alignment: .center)
             }
-            Text(highlighted(line))
+            Text(highlighted(line, at: index, local: local))
                 .padding(.trailing, 10)
         }
         .font(.system(size: 11, design: .monospaced))
@@ -270,9 +283,11 @@ private struct RichCodeView: View {
         )
     }
 
-    private func highlighted(_ line: RichCodeLine) -> AttributedString {
-        if !code.isHighlighted, code.language != nil {
-            return SyntaxHighlighter.highlight(line.text, theme: style.theme)
+    private func highlighted(_ line: RichCodeLine, at index: Int, local: LocalHighlight?) -> AttributedString {
+        if let local {
+            return CodeHighlighting.line(
+                line.text, at: local.lineStarts[index], spans: local.spans, theme: style.theme, tab: "    "
+            )
         }
         var out = AttributedString()
         for token in line.tokens {

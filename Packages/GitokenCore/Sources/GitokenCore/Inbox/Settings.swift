@@ -75,23 +75,21 @@ public struct AppSettings: Hashable, Codable, Sendable {
     public var aiReviews: AIReviewDisplay
     /// When false, AI-authored activity never announces an arrival (or sound).
     public var notifyAIReviews: Bool
-    public var editor: EditorChoice
-    /// Root for per-PR worktrees: `<root>/<owner>/<repo>/pr-<n>`. `~` is expanded at use.
-    public var worktreeRoot: String
-    /// "owner/repo" → absolute path of the local clone, chosen once per repo with a folder picker.
-    public var repoPaths: [String: String]
-    public var shelf: ShelfSettings
     /// Nil disables the global shortcut.
     public var hotKey: HotKey?
     public var muteRules: [MuteRule]
+    /// Presentation-only filter; excluded threads remain locally tracked without changing GitHub state.
+    public var enabledNotificationReasons: Set<NotificationReason>
     public var savedReplies: [String]
+    public var customSections: [CustomSection]
 
     public init(
         appearance: Appearance = .calm, motion: MotionStyle = .gentle, display: DisplayMode = .notch,
         quietHours: QuietHours = .init(), launchAtLogin: Bool = false, sound: ArrivalSound = .drop, soundVolume: Double = 0.35,
-        aiReviews: AIReviewDisplay = .collapse, notifyAIReviews: Bool = false, editor: EditorChoice = .vscode,
-        worktreeRoot: String = "~/.gitoken/worktrees", repoPaths: [String: String] = [:], shelf: ShelfSettings = .init(),
-        hotKey: HotKey? = .openInbox, muteRules: [MuteRule] = [], savedReplies: [String] = SavedReplies.defaults
+        aiReviews: AIReviewDisplay = .collapse, notifyAIReviews: Bool = false,
+        hotKey: HotKey? = .openInbox, muteRules: [MuteRule] = [], savedReplies: [String] = SavedReplies.defaults,
+        enabledNotificationReasons: Set<NotificationReason> = Set(NotificationReason.allCases),
+        customSections: [CustomSection] = []
     ) {
         self.appearance = appearance
         self.motion = motion
@@ -102,18 +100,16 @@ public struct AppSettings: Hashable, Codable, Sendable {
         self.soundVolume = soundVolume
         self.aiReviews = aiReviews
         self.notifyAIReviews = notifyAIReviews
-        self.editor = editor
-        self.worktreeRoot = worktreeRoot
-        self.repoPaths = repoPaths
-        self.shelf = shelf
         self.hotKey = hotKey
         self.muteRules = muteRules
         self.savedReplies = savedReplies
+        self.enabledNotificationReasons = enabledNotificationReasons
+        self.customSections = customSections
     }
 
     private enum CodingKeys: String, CodingKey {
         case appearance, motion, display, quietHours, launchAtLogin, sound, soundVolume, aiReviews, notifyAIReviews
-        case editor, worktreeRoot, repoPaths, shelf, hotKey, muteRules, savedReplies
+        case hotKey, muteRules, savedReplies, enabledNotificationReasons, customSections
     }
 
     /// Settings are stored as JSON; keys added after a release fall back to defaults so older rows still load.
@@ -130,13 +126,12 @@ public struct AppSettings: Hashable, Codable, Sendable {
         soundVolume = min(1, max(0, try c.decodeIfPresent(Double.self, forKey: .soundVolume) ?? d.soundVolume))
         aiReviews = try c.decodeIfPresent(AIReviewDisplay.self, forKey: .aiReviews) ?? d.aiReviews
         notifyAIReviews = try c.decodeIfPresent(Bool.self, forKey: .notifyAIReviews) ?? d.notifyAIReviews
-        editor = try c.decodeIfPresent(EditorChoice.self, forKey: .editor) ?? d.editor
-        worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
-        repoPaths = try c.decodeIfPresent([String: String].self, forKey: .repoPaths) ?? d.repoPaths
-        shelf = try c.decodeIfPresent(ShelfSettings.self, forKey: .shelf) ?? d.shelf
         hotKey = c.contains(.hotKey) ? try c.decodeIfPresent(HotKey.self, forKey: .hotKey) : d.hotKey
         muteRules = try c.decodeIfPresent([MuteRule].self, forKey: .muteRules) ?? d.muteRules
         savedReplies = try c.decodeIfPresent([String].self, forKey: .savedReplies) ?? d.savedReplies
+        enabledNotificationReasons = try c.decodeIfPresent(Set<NotificationReason>.self, forKey: .enabledNotificationReasons)
+            ?? d.enabledNotificationReasons
+        customSections = try c.decodeIfPresent([CustomSection].self, forKey: .customSections) ?? d.customSections
     }
 
     /// Synthesized encoding would omit a nil `hotKey`; write an explicit null so "disabled" survives a reload.
@@ -151,13 +146,15 @@ public struct AppSettings: Hashable, Codable, Sendable {
         try c.encode(soundVolume, forKey: .soundVolume)
         try c.encode(aiReviews, forKey: .aiReviews)
         try c.encode(notifyAIReviews, forKey: .notifyAIReviews)
-        try c.encode(editor, forKey: .editor)
-        try c.encode(worktreeRoot, forKey: .worktreeRoot)
-        try c.encode(repoPaths, forKey: .repoPaths)
-        try c.encode(shelf, forKey: .shelf)
         if let hotKey { try c.encode(hotKey, forKey: .hotKey) } else { try c.encodeNil(forKey: .hotKey) }
         try c.encode(muteRules, forKey: .muteRules)
         try c.encode(savedReplies, forKey: .savedReplies)
+        try c.encode(enabledNotificationReasons, forKey: .enabledNotificationReasons)
+        try c.encode(customSections, forKey: .customSections)
+    }
+
+    func presents(_ thread: NotificationThread) -> Bool {
+        enabledNotificationReasons.contains(thread.reason) && !muteRules.mutes(thread)
     }
 
     /// Presets set both axes; each axis stays independently editable afterwards.
