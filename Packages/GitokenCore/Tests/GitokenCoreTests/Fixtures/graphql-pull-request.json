@@ -16,14 +16,14 @@
           { "content": "LAUGH", "viewerHasReacted": false, "reactors": { "totalCount": 4 } },
           { "content": "HOORAY", "viewerHasReacted": false, "reactors": { "totalCount": 1 } }
         ],
-        "author": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+        "author": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.example.com/u/9101?v=4", "name": "Alex Kim" },
         "timelineItems": {
           "pageInfo": { "hasPreviousPage": false },
           "nodes": [
             {
               "__typename": "IssueComment",
               "id": "IC_kwDOfixture1",
-              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.example.com/u/9102?v=4", "name": "Leo Martins" },
               "body": "Did you check the `?q=` deep-link flow?",
               "bodyHTML": "<p dir=\"auto\">Did you check the <code class=\"notranslate\">?q=</code> deep-link flow?</p>",
               "bodyText": "Did you check the ?q= deep-link flow?",
@@ -41,7 +41,7 @@
                 "oid": "a3f9c21000000000000000000000000000000001",
                 "messageHeadline": "Handle initial query from URL",
                 "committedDate": "2026-09-30T09:20:00Z",
-                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" } }
+                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.example.com/u/9101?v=4", "name": "Alex Kim" } }
               }
             },
             {
@@ -52,7 +52,7 @@
                 "oid": "7be0d44000000000000000000000000000000002",
                 "messageHeadline": "Memoize row renderer",
                 "committedDate": "2026-09-30T09:21:00Z",
-                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" } }
+                "author": { "name": "Alex Kim", "user": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.example.com/u/9101?v=4", "name": "Alex Kim" } }
               }
             },
             {
@@ -63,20 +63,20 @@
                 "oid": "9d03f6e000000000000000000000000000000003",
                 "messageHeadline": "Fix lint in ResultList",
                 "committedDate": "2026-09-30T09:40:00Z",
-                "author": { "name": "Leo Martins", "user": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" } }
+                "author": { "name": "Leo Martins", "user": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.example.com/u/9102?v=4", "name": "Leo Martins" } }
               }
             },
             {
               "__typename": "ReviewRequestedEvent",
               "id": "RRE_fixture1",
-              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.example.com/u/9101?v=4", "name": "Alex Kim" },
               "createdAt": "2026-09-30T09:45:00Z",
               "requestedReviewer": { "__typename": "User", "login": "schen" }
             },
             {
               "__typename": "IssueComment",
               "id": "IC_kwDOfixture2",
-              "author": { "__typename": "Bot", "login": "preview-bot", "avatarUrl": "https://avatars.githubusercontent.com/in/9999?v=4" },
+              "author": { "__typename": "Bot", "login": "preview-bot", "avatarUrl": "https://avatars.example.com/in/9999?v=4" },
               "body": "Preview deployed to https://pr-142.preview.example.dev",
               "createdAt": "2026-09-30T09:50:00Z",
               "url": "https://github.com/platform/web/pull/142#issuecomment-5002"
@@ -84,7 +84,7 @@
             {
               "__typename": "PullRequestReview",
               "id": "PRR_fixture1",
-              "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+              "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.example.com/u/9103?v=4", "name": "Sarah Chen" },
               "body": "A couple of things before this lands.",
               "state": "CHANGES_REQUESTED",
               "createdAt": "2026-09-30T13:32:00Z",
@@ -94,7 +94,7 @@
                   {
                     "id": "PRRC_fixture1",
                     "databaseId": 9001,
-                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.example.com/u/9103?v=4", "name": "Sarah Chen" },
                     "body": "This effect re-subscribes on every keystroke because `onSearch` is recreated by the parent.",
                     "createdAt": "2026-09-30T13:30:00Z",
                     "path": "src/components/SearchBox.tsx",
@@ -110,7 +110,7 @@
                   {
                     "id": "PRRC_fixture2",
                     "databaseId": 9002,
-                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.githubusercontent.com/u/9103?v=4", "name": "Sarah Chen" },
+                    "author": { "__typename": "User", "login": "schen", "avatarUrl": "https://avatars.example.com/u/9103?v=4", "name": "Sarah Chen" },
                     "body": "`key={index}` will defeat the row memoization as soon as results reorder.",
                     "createdAt": "2026-09-30T13:31:00Z",
                     "path": "src/components/ResultList.tsx",
@@ -126,7 +126,7 @@
             {
               "__typename": "PullRequestReview",
               "id": "PRR_fixture2",
-              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+              "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.example.com/u/9102?v=4", "name": "Leo Martins" },
               "body": "",
               "state": "COMMENTED",
               "createdAt": "2026-09-30T13:49:00Z",
@@ -136,7 +136,7 @@
                   {
                     "id": "PRRC_fixture3",
                     "databaseId": 9003,
-                    "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.githubusercontent.com/u/9102?v=4", "name": "Leo Martins" },
+                    "author": { "__typename": "User", "login": "leom", "avatarUrl": "https://avatars.example.com/u/9102?v=4", "name": "Leo Martins" },
                     "body": "+1 to the ref. It also avoids a stale closure in the cleanup.",
                     "createdAt": "2026-09-30T13:49:00Z",
                     "path": "src/components/SearchBox.tsx",
@@ -152,7 +152,7 @@
             {
               "__typename": "HeadRefForcePushedEvent",
               "id": "HRFPE_fixture1",
-              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.githubusercontent.com/u/9101?v=4", "name": "Alex Kim" },
+              "actor": { "__typename": "User", "login": "akim", "avatarUrl": "https://avatars.example.com/u/9101?v=4", "name": "Alex Kim" },
               "createdAt": "2026-09-30T13:55:00Z"
             }
           ]

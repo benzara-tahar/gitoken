@@ -11,7 +11,7 @@
     "login": "akim",
     "id": 9101,
     "node_id": "U_fixture9101",
-    "avatar_url": "https://avatars.githubusercontent.com/u/9101?v=4",
+    "avatar_url": "https://avatars.example.com/u/9101?v=4",
     "type": "User"
   },
   "body": "Moved the callback into a ref — thanks both.",

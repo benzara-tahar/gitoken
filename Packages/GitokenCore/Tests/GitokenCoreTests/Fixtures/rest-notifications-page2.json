@@ -20,7 +20,7 @@
       "owner": {
         "login": "platform",
         "id": 7001,
-        "avatar_url": "https://avatars.githubusercontent.com/u/7001?v=4",
+        "avatar_url": "https://avatars.example.com/u/7001?v=4",
         "type": "Organization"
       },
       "html_url": "https://github.com/platform/rfcs"
@@ -49,7 +49,7 @@
       "owner": {
         "login": "platform",
         "id": 7001,
-        "avatar_url": "https://avatars.githubusercontent.com/u/7001?v=4",
+        "avatar_url": "https://avatars.example.com/u/7001?v=4",
         "type": "Organization"
       },
       "html_url": "https://github.com/platform/api"
