@@ -29,11 +29,11 @@ struct NotchStatusRim<S: Shape>: View {
     private var tint: Color {
         if model.store.pullRequestMonitor.notification != nil, model.store.quietReason == nil { return .green }
         switch status {
-        case .starting: Color(hex: 0x85BFFF)
-        case .ready: Color(hex: 0x6BD9B0)
-        case .unseen: Color(hex: 0x4AA3FF)
-        case .quiet: Color(hex: 0xB4A1FF)
-        case .blocked: Color(hex: 0xFFB35C)
+        case .starting: return Color(hex: 0x85BFFF)
+        case .ready: return Color(hex: 0x6BD9B0)
+        case .unseen: return Color(hex: 0x4AA3FF)
+        case .quiet: return Color(hex: 0xB4A1FF)
+        case .blocked: return Color(hex: 0xFFB35C)
         }
     }
 

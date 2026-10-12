@@ -36,7 +36,7 @@ struct VisualEffect: NSViewRepresentable {
 
 /// Fluid "island": flush with the top edge, concave ears blending into the menu bar when attached to the notch,
 /// continuous rounded bottom corners.
-struct IslandShape: Shape {
+nonisolated struct IslandShape: Shape {
     var ear: CGFloat
     var topRadius: CGFloat
     var bottomRadius: CGFloat

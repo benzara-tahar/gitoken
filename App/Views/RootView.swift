@@ -37,10 +37,10 @@ extension NotchModel {
                 return .ready(ready)
             }
             return visibleArrival.map(SurfaceContent.banner)
-        case .list: .list
-        case .conversation(let id): .conversation(id)
-        case .searchConversation(let id): .searchConversation(id)
-        case .settings: .settings
+        case .list: return .list
+        case .conversation(let id): return .conversation(id)
+        case .searchConversation(let id): return .searchConversation(id)
+        case .settings: return .settings
         }
     }
 

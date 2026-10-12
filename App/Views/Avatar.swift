@@ -155,7 +155,7 @@ struct AvatarStack: View {
 }
 
 /// The Gitoken mark from the prototype (16-unit grid): a bar, a cup, and a dot.
-struct GitokenGlyph: Shape {
+nonisolated struct GitokenGlyph: Shape {
     func path(in rect: CGRect) -> Path {
         let s = min(rect.width, rect.height) / 16
         let o = CGPoint(x: rect.midX - 8 * s, y: rect.midY - 8 * s)
