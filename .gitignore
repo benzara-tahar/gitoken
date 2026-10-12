@@ -1,4 +1,11 @@
 .DS_Store
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
 # Xcode / SwiftPM
 build/
 DerivedData/
