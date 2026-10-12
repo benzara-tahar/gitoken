@@ -39,6 +39,7 @@ public final class InboxStore {
 
     public let now: any NowProvider
     public let customSections: CustomSectionStore
+    public let pullRequestMonitor: PullRequestMonitorStore
 
 
     /// Starts the poll loop: poll immediately, then sleep max(X-Poll-Interval, 60s) with tolerance.
@@ -135,11 +136,14 @@ public final class InboxStore {
         change(&next)
         guard next != settings else { return }
         let reanalyze = next.notifyAIReviews != settings.notifyAIReviews
+            || next.showCommitNotifications != settings.showCommitNotifications
         let filtersChanged = next.muteRules != settings.muteRules
             || next.enabledNotificationReasons != settings.enabledNotificationReasons
+            || next.showCommitNotifications != settings.showCommitNotifications
         settings = next
         if filtersChanged { applyPresentationFilters() }
         customSections.configure(sections: next.customSections)
+        pullRequestMonitor.configure(next.monitoredPullRequests)
         saveAppState()
         syncQuietState()
         if reanalyze { reabsorbCachedDetails() }
@@ -169,7 +173,7 @@ public final class InboxStore {
         var changed: [TrackedThread] = []
         for (id, var row) in rows where !row.needsHydration {
             guard let detail = conversations[id]?.detail ?? cachedDetail(id, account: account) else { continue }
-            row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews)
+            row.absorb(detail.replacingItems(settings.conversationItems(detail.items)), viewer: viewer, includeAI: settings.notifyAIReviews)
             changed.append(row)
         }
         store(changed)
@@ -223,7 +227,7 @@ public final class InboxStore {
             saveDetail(detail, account: account)
             guard var row = rows[id], self.viewer == viewer else { break }
             if let newest = detail.items.last?.createdAt { row.markSeen(through: newest) }
-            if row.thread.updatedAt == thread.updatedAt { row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews) }
+            if row.thread.updatedAt == thread.updatedAt { row.absorb(detail.replacingItems(settings.conversationItems(detail.items)), viewer: viewer, includeAI: settings.notifyAIReviews) }
             store([row])
         case .failure(let error):
             conversations[id]?.error = error
@@ -393,6 +397,7 @@ public final class InboxStore {
         self.tokens = tokens
         self.calendar = calendar
         customSections = CustomSectionStore(service: service as? any GitHubSearchService, database: database, now: now)
+        pullRequestMonitor = PullRequestMonitorStore(service: service as? any PullRequestMonitoringService)
 
         let saved: PersistedAppState
         do {
@@ -402,6 +407,10 @@ public final class InboxStore {
             saved = PersistedAppState()
         }
         settings = saved.settings
+        pullRequestMonitor.configure(saved.settings.monitoredPullRequests)
+        pullRequestMonitor.onChange = { [weak self] records in
+            self?.updateSettings { $0.monitoredPullRequests = records }
+        }
         customSections.configure(sections: saved.settings.customSections)
         manualQuiet = saved.manualQuiet
         globalSnoozeUntil = saved.globalSnoozeUntil
@@ -410,6 +419,7 @@ public final class InboxStore {
         collectedReason = saved.collectedReason
         if let viewer = saved.viewer {
             self.viewer = viewer
+            pullRequestMonitor.setAccount(viewer.login)
             phase = .ready(viewer: viewer)
             rows = loadRows(for: AccountKey(login: viewer.login))
             customSections.setAccount(AccountKey(login: viewer.login))
@@ -489,6 +499,8 @@ public final class InboxStore {
         let details = await hydrate(changes, account: account, viewer: viewer)
         guard self.viewer == viewer else { return }
         announce(changes, details: details, viewer: viewer)
+        await pullRequestMonitor.refresh(announce: currentQuietReason == nil)
+        guard self.viewer == viewer else { return }
         lastSyncAt = now.now()
         lastSyncError = nil
     }
@@ -511,6 +523,7 @@ public final class InboxStore {
         viewer = fetched
         phase = .ready(viewer: fetched)
         customSections.setAccount(AccountKey(login: fetched.login))
+        pullRequestMonitor.setAccount(fetched.login)
         if previous?.login.caseInsensitiveCompare(fetched.login) != .orderedSame {
             // First run or the gh account changed: everything below is per-account.
             if previous != nil {
@@ -635,7 +648,7 @@ public final class InboxStore {
             }
             switch result {
             case .success(let detail):
-                row.absorb(detail, viewer: viewer, includeAI: settings.notifyAIReviews)
+                row.absorb(detail.replacingItems(settings.conversationItems(detail.items)), viewer: viewer, includeAI: settings.notifyAIReviews)
                 details[thread.id] = detail
                 if conversations[thread.id] != nil { conversations[thread.id]?.detail = detail }
                 saveDetail(detail, account: account)
@@ -654,9 +667,13 @@ public final class InboxStore {
         for change in changes where change.announce {
             guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current),
                   settings.presents(row.thread) else { continue }
+            if !settings.showCommitNotifications, let detail = details[change.id], let boundary = change.previousUpdatedAt {
+                let updates = detail.items.filter { $0.createdAt > boundary }
+                if !updates.isEmpty && updates.allSatisfy(\.isCommitNotification) { continue }
+            }
             let includeAI = settings.notifyAIReviews
             let fresh = details[change.id].map {
-                ActivityAnalysis.items(in: $0, byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
+                ActivityAnalysis.items(in: $0.replacingItems(settings.conversationItems($0.items)), byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
             } ?? []
             // AI-only activity stays in the inbox (GitHub still lists it unread) but is not announced.
             if !includeAI, fresh.isEmpty, let detail = details[change.id],

@@ -12,6 +12,7 @@ struct NotchStatusRim<S: Shape>: View {
     private struct Pulse: Hashable {
         let status: Status
         let arrival: UUID?
+        let ready: UUID?
         let updates: Int
         let reduced: Bool
     }
@@ -26,6 +27,7 @@ struct NotchStatusRim<S: Shape>: View {
     }
 
     private var tint: Color {
+        if model.store.pullRequestMonitor.notification != nil, model.store.quietReason == nil { return .green }
         switch status {
         case .starting: Color(hex: 0x85BFFF)
         case .ready: Color(hex: 0x6BD9B0)
@@ -37,7 +39,7 @@ struct NotchStatusRim<S: Shape>: View {
 
     var body: some View {
         let arrival = model.visibleArrival
-        let pulse = Pulse(status: status, arrival: arrival?.id, updates: arrival?.updateCount ?? 0, reduced: motion.isReduced)
+        let pulse = Pulse(status: status, arrival: arrival?.id, ready: model.store.pullRequestMonitor.notification?.id, updates: arrival?.updateCount ?? 0, reduced: motion.isReduced)
         shape.stroke(
             LinearGradient(colors: [tint.opacity(0.25), tint.opacity(status == .ready ? 0.55 : 0.95)], startPoint: .top, endPoint: .bottom),
             lineWidth: 1.5

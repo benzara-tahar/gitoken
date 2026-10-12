@@ -69,7 +69,8 @@ struct ConversationView: View {
         return SurfaceHeader(width: width) {
             BackButton(badge: others) { model.back() }
         } trailing: {
-            if let g = model.group(id), model.pullRequestRef(g) != nil {
+            if let g = model.group(id), let ref = model.pullRequestRef(g) {
+                MonitorPullRequestButton(ref: ref)
                 IconButton(symbol: "doc.text.magnifyingglass", label: "Files: preview the changed files") {
                     model.previewController?.showFiles(for: id)
                 }
@@ -176,7 +177,7 @@ struct ConversationView: View {
         if let detail = state?.detail {
             let aiMode = model.store.settings.aiReviews
             let hiddenAI = aiMode == .hide && !revealAI ? detail.items.filter(AIReviewers.isAIActivity) : []
-            let items = hiddenAI.isEmpty ? detail.items : detail.items.filter { !AIReviewers.isAIActivity($0) }
+            let items = model.settings.conversationItems(hiddenAI.isEmpty ? detail.items : detail.items.filter { !AIReviewers.isAIActivity($0) })
             let split = TimelineSplit(
                 items: items, lastVisitAt: state?.lastVisitAt, viewer: model.viewerLogin,
                 showAllOlder: model.olderShown.contains(id)

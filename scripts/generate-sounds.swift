@@ -153,12 +153,25 @@ func tap() -> [Double] {
     return x
 }
 
+/// A rising major triad, distinct from the short arrival sounds.
+func ready() -> [Double] {
+    var x = render([
+        Partial(frequency: 659.25, amplitude: 1, decay: 0.14),
+        Partial(frequency: 830.61, amplitude: 0.85, decay: 0.16, start: 0.12),
+        Partial(frequency: 987.77, amplitude: 0.8, decay: 0.20, start: 0.24),
+        Partial(frequency: 1318.51, amplitude: 0.35, decay: 0.18, start: 0.24),
+    ], duration: 0.9)
+    lowPass(&x, cutoff: 5_000)
+    fadeOut(&x, release: 0.06)
+    return x
+}
+
 let outDir = CommandLine.arguments.count > 1
     ? URL(fileURLWithPath: CommandLine.arguments[1])
     : URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../App/Resources/Sounds").standardizedFileURL
 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
-for (name, rendered) in [("Drop", drop()), ("Chime", chime()), ("Tap", tap())] {
+for (name, rendered) in [("Drop", drop()), ("Chime", chime()), ("Tap", tap()), ("Ready", ready())] {
     var x = rendered
     normalize(&x, peakDB: targetPeakDB)
     let pcm = pcm16(x)

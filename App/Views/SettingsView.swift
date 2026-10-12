@@ -183,6 +183,18 @@ struct SettingsView: View {
                 note("Plays once per new arrival. Quiet mode, quiet hours, snooze and full-screen apps keep it silent.")
             }
 
+            section("Commit notifications") {
+                card {
+                    row("Show commit notifications", detail: "Pushed commits and force pushes in conversations", last: true) {
+                        Toggle("Show commit notifications", isOn: Binding(
+                            get: { s.showCommitNotifications },
+                            set: { v in store.updateSettings { $0.showCommitNotifications = v } }
+                        )).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                    }
+                }
+            }
+            PullRequestMonitorSettings()
+
             section("AI reviews") {
                 card {
                     row("In conversations", detail: "Copilot, CodeRabbit and other review bots") {
