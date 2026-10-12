@@ -82,6 +82,8 @@ public struct AppSettings: Hashable, Codable, Sendable {
     public var enabledNotificationReasons: Set<NotificationReason>
     public var savedReplies: [String]
     public var customSections: [CustomSection]
+    public var showCommitNotifications: Bool
+    public var monitoredPullRequests: [MonitoredPullRequest]
 
     public init(
         appearance: Appearance = .calm, motion: MotionStyle = .gentle, display: DisplayMode = .notch,
@@ -89,7 +91,8 @@ public struct AppSettings: Hashable, Codable, Sendable {
         aiReviews: AIReviewDisplay = .collapse, notifyAIReviews: Bool = false,
         hotKey: HotKey? = .openInbox, muteRules: [MuteRule] = [], savedReplies: [String] = SavedReplies.defaults,
         enabledNotificationReasons: Set<NotificationReason> = Set(NotificationReason.allCases),
-        customSections: [CustomSection] = []
+        customSections: [CustomSection] = [], showCommitNotifications: Bool = false,
+        monitoredPullRequests: [MonitoredPullRequest] = []
     ) {
         self.appearance = appearance
         self.motion = motion
@@ -105,11 +108,13 @@ public struct AppSettings: Hashable, Codable, Sendable {
         self.savedReplies = savedReplies
         self.enabledNotificationReasons = enabledNotificationReasons
         self.customSections = customSections
+        self.showCommitNotifications = showCommitNotifications
+        self.monitoredPullRequests = monitoredPullRequests
     }
 
     private enum CodingKeys: String, CodingKey {
         case appearance, motion, display, quietHours, launchAtLogin, sound, soundVolume, aiReviews, notifyAIReviews
-        case hotKey, muteRules, savedReplies, enabledNotificationReasons, customSections
+        case hotKey, muteRules, savedReplies, enabledNotificationReasons, customSections, showCommitNotifications, monitoredPullRequests
     }
 
     /// Settings are stored as JSON; keys added after a release fall back to defaults so older rows still load.
@@ -132,6 +137,8 @@ public struct AppSettings: Hashable, Codable, Sendable {
         enabledNotificationReasons = try c.decodeIfPresent(Set<NotificationReason>.self, forKey: .enabledNotificationReasons)
             ?? d.enabledNotificationReasons
         customSections = try c.decodeIfPresent([CustomSection].self, forKey: .customSections) ?? d.customSections
+        showCommitNotifications = try c.decodeIfPresent(Bool.self, forKey: .showCommitNotifications) ?? d.showCommitNotifications
+        monitoredPullRequests = try c.decodeIfPresent([MonitoredPullRequest].self, forKey: .monitoredPullRequests) ?? []
     }
 
     /// Synthesized encoding would omit a nil `hotKey`; write an explicit null so "disabled" survives a reload.
@@ -151,10 +158,13 @@ public struct AppSettings: Hashable, Codable, Sendable {
         try c.encode(savedReplies, forKey: .savedReplies)
         try c.encode(enabledNotificationReasons, forKey: .enabledNotificationReasons)
         try c.encode(customSections, forKey: .customSections)
+        try c.encode(showCommitNotifications, forKey: .showCommitNotifications)
+        try c.encode(monitoredPullRequests, forKey: .monitoredPullRequests)
     }
 
     func presents(_ thread: NotificationThread) -> Bool {
         enabledNotificationReasons.contains(thread.reason) && !muteRules.mutes(thread)
+            && (showCommitNotifications || thread.kind != .commit)
     }
 
     /// Presets set both axes; each axis stays independently editable afterwards.

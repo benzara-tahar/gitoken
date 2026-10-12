@@ -22,6 +22,9 @@ struct SearchConversationView: View {
                 SurfaceHeader(width: width) {
                     BackButton(title: backTitle) { model.back() }
                 } trailing: {
+                    if let item = model.searchItem(id), item.kind == .pullRequest {
+                        MonitorPullRequestButton(ref: PullRequestRef(repo: item.repo, number: item.number))
+                    }
                     IconButton(symbol: model.pinned ? "pin.fill" : "pin", label: "Pin panel open", active: model.pinned) {
                         model.pinned.toggle()
                     }
@@ -88,7 +91,7 @@ struct SearchConversationView: View {
             if let detail = state?.detail {
                 let mode = model.settings.aiReviews
                 let hidden = mode == .hide && !revealAI ? detail.items.filter(AIReviewers.isAIActivity) : []
-                let items = hidden.isEmpty ? detail.items : detail.items.filter { !AIReviewers.isAIActivity($0) }
+                let items = model.settings.conversationItems(hidden.isEmpty ? detail.items : detail.items.filter { !AIReviewers.isAIActivity($0) })
                 let split = TimelineSplit(items: items, lastVisitAt: state?.lastVisitAt,
                                           viewer: model.viewerLogin, showAllOlder: true)
                 entries(split.older, collapseAI: mode == .collapse)

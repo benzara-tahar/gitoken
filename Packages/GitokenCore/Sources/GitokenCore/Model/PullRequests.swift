@@ -56,3 +56,31 @@ extension [ReactionCount] {
         return ReactionContent.allCases.compactMap { byContent[$0] }
     }
 }
+
+
+extension PullRequestRef {
+    /// Accept only a public GitHub PR URL, never arbitrary hosts or issue links.
+    public init?(urlString: String) {
+        guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme == "https", url.host?.lowercased() == "github.com", url.user == nil, url.password == nil,
+              url.port == nil else { return nil }
+        let parts = url.path.split(separator: "/")
+        guard parts.count >= 4, parts[2] == "pull", let number = Int(parts[3]), number > 0 else { return nil }
+        self.init(repo: RepoRef(owner: parts[0].lowercased(), name: parts[1].lowercased()), number: number)
+    }
+}
+
+extension TimelineItem {
+    public var isCommitNotification: Bool {
+        switch payload {
+        case .commits, .event(.headRefForcePushed, _): true
+        default: false
+        }
+    }
+}
+
+extension AppSettings {
+    public func conversationItems(_ items: [TimelineItem]) -> [TimelineItem] {
+        showCommitNotifications ? items : items.filter { !$0.isCommitNotification }
+    }
+}

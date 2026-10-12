@@ -4,6 +4,7 @@ import SwiftUI
 /// What the expanded surface is showing.
 enum SurfaceContent: Equatable {
     case banner(Arrival)
+    case ready(ReadyPullRequest)
     case list
     case conversation(ThreadID)
     case searchConversation(SearchItemID)
@@ -13,6 +14,7 @@ enum SurfaceContent: Equatable {
     var key: String {
         switch self {
         case .banner(let a): "banner-\(a.id)"
+        case .ready(let pr): "ready-\(pr.id)"
         case .list: "list"
         case .conversation(let id): "convo-\(id.rawValue)"
         case .searchConversation(let id): "search-convo-\(id.rawValue)"
@@ -22,6 +24,7 @@ enum SurfaceContent: Equatable {
 
     var isBanner: Bool {
         if case .banner = self { return true }
+        if case .ready = self { return true }
         return false
     }
 }
@@ -29,7 +32,11 @@ enum SurfaceContent: Equatable {
 extension NotchModel {
     var surfaceContent: SurfaceContent? {
         switch route {
-        case .collapsed: visibleArrival.map(SurfaceContent.banner)
+        case .collapsed:
+            if !hiddenForFullscreen, store.quietReason == nil, let ready = store.pullRequestMonitor.notification {
+                return .ready(ready)
+            }
+            return visibleArrival.map(SurfaceContent.banner)
         case .list: .list
         case .conversation(let id): .conversation(id)
         case .searchConversation(let id): .searchConversation(id)
@@ -42,7 +49,7 @@ extension NotchModel {
         let fluid = theme.isFluid
         let width: CGFloat
         switch content {
-        case .banner: width = fluid ? 424 : 376
+        case .banner, .ready: width = fluid ? 424 : 376
         case .list, .settings: width = fluid ? 408 : 392
         case .conversation(let id): width = hasExpandedDiff(id) ? 720 : (fluid ? 436 : 420)
         case .searchConversation: width = fluid ? 436 : 420
@@ -221,6 +228,8 @@ struct SurfaceBody: View {
         switch content {
         case .banner(let arrival):
             ArrivalBannerView(arrival: arrival, width: width)
+        case .ready(let pr):
+            ReadyPullRequestBanner(ready: pr, width: width)
         case .list:
             switch model.store.phase {
             case .blocked(let error): BlockedView(error: error, width: width)

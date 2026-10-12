@@ -17,6 +17,8 @@ final class NotchController {
     private var monitors: [Any] = []
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var soundPolicy = SoundPolicy()
+    private var lastReadyID: UUID?
+    private var readyDismissTask: Task<Void, Never>?
     private var hotKey: GlobalHotKey?
     private var focusedRoute: NotchModel.Route = .collapsed
     private var startupAuthHandled = false
@@ -43,6 +45,7 @@ final class NotchController {
         installObservers()
         observeRoute()
         observeArrival()
+        observeReadyPullRequest()
         hotKey = GlobalHotKey(model: model) { [model] in model.toggleFromHotKey() }
         panel.orderFrontRegardless()
         updateFullscreen()
@@ -209,6 +212,30 @@ final class NotchController {
             model.sounds.play(cue.sound, volume: cue.volume, reason: "arrival \(arrival.id) ×\(arrival.updateCount)")
         } else {
             SoundPlayer.log.info("Silent: arrival \(arrival.id, privacy: .public) ×\(arrival.updateCount)")
+        }
+    }
+
+    private func observeReadyPullRequest() {
+        let store = model.store
+        if let ready = store.pullRequestMonitor.notification, ready.id != lastReadyID {
+            lastReadyID = ready.id
+            readyDismissTask?.cancel()
+            if store.quietReason == nil, !model.hiddenForFullscreen {
+                if store.settings.sound != .off, store.settings.soundVolume > 0 {
+                    model.sounds.playReady(volume: store.settings.soundVolume)
+                }
+                if model.route.isOpen { model.showToast("Ready to merge: \(ready.ref.repo.fullName) #\(ready.ref.number)") }
+            }
+            readyDismissTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled, let self, self.model.store.pullRequestMonitor.notification?.id == ready.id else { return }
+                self.model.store.pullRequestMonitor.dismissNotification()
+            }
+        }
+        withObservationTracking {
+            _ = store.pullRequestMonitor.notification
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeReadyPullRequest() }
         }
     }
 
