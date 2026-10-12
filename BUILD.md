@@ -60,6 +60,7 @@ afinfo App/Resources/Sounds/Drop.caf
 
 - Hidden debug controls: open the notch, then Settings › General. A Debug section at the bottom advances the app clock by 30 minutes, 1 hour or 1 day (to check snooze expiry and quiet hours) and, with `--fixtures`, simulates a new notification, a burst on one pull request, or activity on a done group.
 - The same actions are on a right-click menu on the collapsed notch, so you can fire a burst while an arrival banner is still showing and watch it merge.
+- `--scene <inbox|conversation|preview|review|settings> [owner/repo#number]`, together with `--fixtures`, opens that view on launch, over a full-screen gradient backdrop so the panels' glass can't pick up other apps. `scripts/screenshots.sh` uses it to regenerate `docs/assets/screenshots/`: it quits any running Gitoken, captures only Gitoken's own windows and composites them onto the same gradient. The terminal needs Screen Recording permission.
 
 None of these exist in Release builds.
 

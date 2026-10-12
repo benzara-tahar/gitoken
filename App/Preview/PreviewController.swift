@@ -384,3 +384,18 @@ final class PreviewWindow: NSObject, NSWindowDelegate {
         onResize?(panel.frame.size)
     }
 }
+
+#if DEBUG
+extension PreviewController {
+    /// Screenshot scenes: moves the main preview to the right of the open notch surface, narrowing it to fit the screen.
+    func debugPlaceBesideSurface(width surfaceWidth: CGFloat) {
+        guard let panel = main?.panel, let anchor = notchWindow?.frame,
+              let visible = (notchWindow?.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let x = (anchor.midX + surfaceWidth / 2 + 12).rounded()
+        var frame = panel.frame
+        frame.origin.x = x
+        frame.size.width = max(PreviewPanel.minSize.width, min(frame.width, visible.maxX - 8 - x))
+        panel.setFrame(frame, display: true)
+    }
+}
+#endif

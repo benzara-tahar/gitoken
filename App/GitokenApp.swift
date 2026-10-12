@@ -34,6 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onResume: { store.resume() }
         )
         store.start()
+        #if DEBUG
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--scene"), i + 1 < args.count {
+            ScreenshotBackdrop.show(below: notch.window)
+            notch.model.debugOpenScene(args[i + 1], subject: args.count > i + 2 ? args[i + 2] : nil)
+        }
+        #endif
     }
 
     private static func makeStore() -> InboxStore {
