@@ -37,6 +37,40 @@ enum ActivityAnalysis {
         }
     }
 
+    /// The viewer's role as far as this timeline shows: author, reviewer/commenter, or mentioned by someone else.
+    static func involvement(in detail: ThreadDetail, viewer: Actor) -> Involvement {
+        var result: Involvement = detail.author.map { isViewer($0, viewer) } == true ? .author : []
+        for item in detail.items {
+            if !isViewer(item.actor, viewer) {
+                if mentions(viewer, in: item.payload) { result.insert(.mentioned) }
+                continue
+            }
+            switch item.payload {
+            case .comment, .review: result.insert(.participant)
+            case .opened, .commits, .checks, .event: break
+            }
+        }
+        return result
+    }
+
+    /// The payload's text (description, comment, review body or review comments) @-mentions the viewer.
+    static func mentions(_ viewer: Actor, in payload: TimelinePayload) -> Bool {
+        switch payload {
+        case .opened(let body), .comment(let body):
+            mentions(viewer, in: body.markdown)
+        case .review(_, let body, let comments):
+            mentions(viewer, in: body.markdown) || comments.contains { mentions(viewer, in: $0.body.markdown) }
+        case .commits, .checks, .event:
+            false
+        }
+    }
+
+    /// A review request addressed to the viewer (a nil reviewer is read as the viewer, matching the preview verb).
+    static func requestsReview(of viewer: Actor, _ item: TimelineItem) -> Bool {
+        guard case .event(.reviewRequested, let reviewer) = item.payload else { return false }
+        return reviewer.map { $0.caseInsensitiveCompare(viewer.login) == .orderedSame } ?? true
+    }
+
     private static func relevant(_ items: [TimelineItem], includeAI: Bool) -> [TimelineItem] {
         includeAI ? items : items.filter { !AIReviewers.isAI($0.actor) }
     }
@@ -79,8 +113,7 @@ enum ActivityAnalysis {
             case .approved: return (.approved, text)
             case .changesRequested: return (.requestedChanges, text)
             case .commented, .dismissed, .pending:
-                let mentioned = mentions(viewer, in: body.markdown) || comments.contains { mentions(viewer, in: $0.body.markdown) }
-                return (mentioned ? .mentioned : .reviewed, text)
+                return (mentions(viewer, in: payload) ? .mentioned : .reviewed, text)
             }
         case .commits(let count, let headlines):
             return (.pushed, count > 1 ? "\(count) commits" : headlines.last)

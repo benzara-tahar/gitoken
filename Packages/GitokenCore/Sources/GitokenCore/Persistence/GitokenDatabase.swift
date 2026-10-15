@@ -156,6 +156,13 @@ final class GitokenDatabase: Sendable {
                 t.primaryKey(["accountHost", "accountLogin", "sectionID", "query"])
             }
         }
+        migrator.registerMigration("v7-involvement") { db in
+            try db.alter(table: ThreadRow.databaseTableName) { t in
+                t.add(column: "involvement", .integer).notNull().defaults(to: 0)
+            }
+            // Existing rows never recorded the viewer's role: let them re-hydrate to learn it.
+            try db.execute(sql: "UPDATE \(ThreadRow.databaseTableName) SET hydratedThrough = NULL")
+        }
         return migrator
     }
 
@@ -375,6 +382,7 @@ private struct ThreadRow: FetchableRecord, PersistableRecord {
         tracked.resurfaced = (row["resurfaced"] as String?).flatMap(ResurfaceReason.init(rawValue:))
         tracked.hydratedThrough = Date(storageValue: row["hydratedThrough"])
         tracked.keptLocally = row["keptLocally"]
+        tracked.learnedInvolvement = Involvement(rawValue: row["involvement"])
         self.tracked = tracked
     }
 
@@ -396,6 +404,7 @@ private struct ThreadRow: FetchableRecord, PersistableRecord {
         container["resurfaced"] = tracked.resurfaced?.rawValue
         container["hydratedThrough"] = tracked.hydratedThrough?.storageValue
         container["keptLocally"] = tracked.keptLocally
+        container["involvement"] = tracked.learnedInvolvement.rawValue
     }
 }
 

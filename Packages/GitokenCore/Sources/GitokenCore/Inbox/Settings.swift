@@ -84,6 +84,9 @@ public struct AppSettings: Hashable, Codable, Sendable {
     public var customSections: [CustomSection]
     public var showCommitNotifications: Bool
     public var monitoredPullRequests: [MonitoredPullRequest]
+    /// Limits the inbox to threads the viewer opened, reviewed or commented on, plus direct @-mentions. Other
+    /// people's threads only announce when the new activity mentions the viewer; review requests never announce.
+    public var onlyMyWork: Bool
 
     public init(
         appearance: Appearance = .calm, motion: MotionStyle = .gentle, display: DisplayMode = .notch,
@@ -92,7 +95,7 @@ public struct AppSettings: Hashable, Codable, Sendable {
         hotKey: HotKey? = .openInbox, muteRules: [MuteRule] = [], savedReplies: [String] = SavedReplies.defaults,
         enabledNotificationReasons: Set<NotificationReason> = Set(NotificationReason.allCases),
         customSections: [CustomSection] = [], showCommitNotifications: Bool = false,
-        monitoredPullRequests: [MonitoredPullRequest] = []
+        monitoredPullRequests: [MonitoredPullRequest] = [], onlyMyWork: Bool = false
     ) {
         self.appearance = appearance
         self.motion = motion
@@ -110,11 +113,12 @@ public struct AppSettings: Hashable, Codable, Sendable {
         self.customSections = customSections
         self.showCommitNotifications = showCommitNotifications
         self.monitoredPullRequests = monitoredPullRequests
+        self.onlyMyWork = onlyMyWork
     }
 
     private enum CodingKeys: String, CodingKey {
         case appearance, motion, display, quietHours, launchAtLogin, sound, soundVolume, aiReviews, notifyAIReviews
-        case hotKey, muteRules, savedReplies, enabledNotificationReasons, customSections, showCommitNotifications, monitoredPullRequests
+        case hotKey, muteRules, savedReplies, enabledNotificationReasons, customSections, showCommitNotifications, monitoredPullRequests, onlyMyWork
     }
 
     /// Settings are stored as JSON; keys added after a release fall back to defaults so older rows still load.
@@ -139,6 +143,7 @@ public struct AppSettings: Hashable, Codable, Sendable {
         customSections = try c.decodeIfPresent([CustomSection].self, forKey: .customSections) ?? d.customSections
         showCommitNotifications = try c.decodeIfPresent(Bool.self, forKey: .showCommitNotifications) ?? d.showCommitNotifications
         monitoredPullRequests = try c.decodeIfPresent([MonitoredPullRequest].self, forKey: .monitoredPullRequests) ?? []
+        onlyMyWork = try c.decodeIfPresent(Bool.self, forKey: .onlyMyWork) ?? d.onlyMyWork
     }
 
     /// Synthesized encoding would omit a nil `hotKey`; write an explicit null so "disabled" survives a reload.
@@ -160,11 +165,17 @@ public struct AppSettings: Hashable, Codable, Sendable {
         try c.encode(customSections, forKey: .customSections)
         try c.encode(showCommitNotifications, forKey: .showCommitNotifications)
         try c.encode(monitoredPullRequests, forKey: .monitoredPullRequests)
+        try c.encode(onlyMyWork, forKey: .onlyMyWork)
     }
 
     func presents(_ thread: NotificationThread) -> Bool {
         enabledNotificationReasons.contains(thread.reason) && !muteRules.mutes(thread)
             && (showCommitNotifications || thread.kind != .commit)
+    }
+
+    /// `presents(_:)` plus the "only my work" scope, which needs what hydration learned about the viewer's role.
+    func presents(_ row: TrackedThread) -> Bool {
+        presents(row.thread) && (!onlyMyWork || !row.involvement.isEmpty)
     }
 
     /// Presets set both axes; each axis stays independently editable afterwards.

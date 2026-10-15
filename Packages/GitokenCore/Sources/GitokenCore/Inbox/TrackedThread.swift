@@ -20,10 +20,15 @@ struct TrackedThread: Equatable, Sendable {
     /// Un-done locally while GitHub still considers it done, so absence from the listing must not re-done it.
     /// Cleared as soon as the thread is listed again.
     var keptLocally = false
+    /// What hydrated timelines showed about the viewer's role. Only grows: timelines are capped to recent items, so an
+    /// older review or mention must not be forgotten once it scrolls out.
+    var learnedInvolvement: Involvement = []
 
     init(thread: NotificationThread) { self.thread = thread }
 
     var id: ThreadID { thread.id }
+
+    var involvement: Involvement { learnedInvolvement.union(Involvement(reason: thread.reason)) }
 
     var isUnseen: Bool {
         guard thread.unread else { return false }
@@ -46,6 +51,7 @@ struct TrackedThread: Equatable, Sendable {
         unseenCount = ActivityAnalysis.items(
             in: detail, byOthersThan: viewer, after: lastVisitAt ?? thread.lastReadAt, includeAI: includeAI
         ).count
+        learnedInvolvement.formUnion(ActivityAnalysis.involvement(in: detail, viewer: viewer))
         state = detail.state
         hydratedThrough = thread.updatedAt
     }
@@ -60,6 +66,31 @@ struct TrackedThread: Equatable, Sendable {
             thread: thread, state: state, preview: preview, actors: actors, isUnseen: isUnseen,
             unseenCount: unseenCount, lastVisitAt: lastVisitAt, doneAt: doneAt, snoozedUntil: snoozedUntil,
             resurfaced: resurfaced)
+    }
+}
+
+/// How the viewer relates to a thread, for the "only my work" scope.
+struct Involvement: OptionSet, Hashable, Sendable {
+    let rawValue: Int
+    /// The viewer opened the PR/issue.
+    static let author = Involvement(rawValue: 1 << 0)
+    /// The viewer reviewed, commented on, closed or merged it.
+    static let participant = Involvement(rawValue: 1 << 1)
+    /// Someone else @-mentioned the viewer in it.
+    static let mentioned = Involvement(rawValue: 1 << 2)
+    /// The viewer's own work; any other involvement comes from mentions alone.
+    static let ownWork: Involvement = [.author, .participant]
+
+    init(rawValue: Int) { self.rawValue = rawValue }
+
+    /// GitHub keeps one reason per thread and may leave a reviewed PR at `review_requested`, hence the timeline check.
+    init(reason: NotificationReason) {
+        switch reason {
+        case .author: self = .author
+        case .comment, .stateChange: self = .participant
+        case .mention: self = .mentioned
+        default: self = []
+        }
     }
 }
 

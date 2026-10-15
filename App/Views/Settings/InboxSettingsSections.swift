@@ -8,6 +8,14 @@ struct NotificationTypesSettingsSection: View {
         let reasons = NotificationReason.allCases.filter(\.isInInboxScope)
         SettingsSection(title: "Notification types") {
             SettingsCard {
+                SettingsRow(title: "Only my work", detail: "PRs you opened or reviewed, plus direct mentions. No review requests.", last: true) {
+                    Toggle("Only my work", isOn: Binding(
+                        get: { model.settings.onlyMyWork },
+                        set: { v in model.store.updateSettings { $0.onlyMyWork = v } }
+                    )).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
+            }
+            SettingsCard {
                 ForEach(Array(reasons.enumerated()), id: \.element) { index, reason in
                     SettingsRow(title: title(reason), last: index == reasons.count - 1) {
                         Toggle(title(reason), isOn: Binding(

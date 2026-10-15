@@ -106,7 +106,7 @@ public final class InboxStore {
             row.snoozedUntil = nil
             row.resurfaced = .snoozeEnded
             changed.append(row)
-            if currentQuietReason == nil, settings.presents(row.thread) {
+            if currentQuietReason == nil, settings.presents(row) {
                 arrivals.enqueue(Arrival(kind: .snoozeEnded(groupID: row.id), updateCount: 1, actors: row.actors))
             }
         }
@@ -140,6 +140,7 @@ public final class InboxStore {
         let filtersChanged = next.muteRules != settings.muteRules
             || next.enabledNotificationReasons != settings.enabledNotificationReasons
             || next.showCommitNotifications != settings.showCommitNotifications
+            || next.onlyMyWork != settings.onlyMyWork
         settings = next
         if filtersChanged { applyPresentationFilters() }
         customSections.configure(sections: next.customSections)
@@ -160,7 +161,7 @@ public final class InboxStore {
     }
 
     private func applyPresentationFilters() {
-        let excluded = Set(rows.values.filter { !settings.presents($0.thread) }.map(\.id))
+        let excluded = Set(rows.values.filter { !settings.presents($0) }.map(\.id))
         arrivals.remove(excluded)
         collected.remove(excluded)
         rebuildGroups()
@@ -628,7 +629,8 @@ public final class InboxStore {
         let urgentIDs = changes.filter(\.announce).map(\.id)
         let urgent = urgentIDs.compactMap { rows[$0] }.filter { $0.needsHydration && policy.presents($0.thread) }
         let urgentSet = Set(urgentIDs)
-        // Excluded rows stay tracked; the next poll's backfill catches them up after re-enabling.
+        // Excluded rows stay tracked; the next poll's backfill catches them up after re-enabling. The "only my work"
+        // scope is deliberately not applied: hydration is how a reviewed or mentioning thread gets noticed.
         let backfill = rows.values
             .filter { !urgentSet.contains($0.id) && $0.doneAt == nil && $0.needsHydration && policy.presents($0.thread) }
             .sorted { a, b in
@@ -666,19 +668,22 @@ public final class InboxStore {
         var collectedChanged = false
         for change in changes where change.announce {
             guard let row = rows[change.id], row.doneAt == nil, row.isUnseen, !row.isSnoozed(at: current),
-                  settings.presents(row.thread) else { continue }
+                  settings.presents(row) else { continue }
             if !settings.showCommitNotifications, let detail = details[change.id], let boundary = change.previousUpdatedAt {
                 let updates = detail.items.filter { $0.createdAt > boundary }
                 if !updates.isEmpty && updates.allSatisfy(\.isCommitNotification) { continue }
             }
             let includeAI = settings.notifyAIReviews
-            let fresh = details[change.id].map {
+            var fresh = details[change.id].map {
                 ActivityAnalysis.items(in: $0.replacingItems(settings.conversationItems($0.items)), byOthersThan: viewer, after: change.previousUpdatedAt, includeAI: includeAI)
             } ?? []
             // AI-only activity stays in the inbox (GitHub still lists it unread) but is not announced.
             if !includeAI, fresh.isEmpty, let detail = details[change.id],
                !ActivityAnalysis.items(in: detail, byOthersThan: viewer, after: change.previousUpdatedAt).isEmpty
             {
+                continue
+            }
+            if settings.onlyMyWork, !Self.announcesInMyWork(row, fresh: &fresh, hydrated: details[change.id] != nil, viewer: viewer) {
                 continue
             }
             let count = change.previousUpdatedAt == nil ? 1 : max(1, fresh.count)
@@ -698,6 +703,19 @@ public final class InboxStore {
         }
         if collectedChanged { saveAppState() }
         publishArrival()
+    }
+
+    /// "Only my work": drops review requests of the viewer from `fresh` and skips activity made only of them. Threads
+    /// that aren't the viewer's own work announce only when the new activity @-mentions the viewer.
+    private static func announcesInMyWork(
+        _ row: TrackedThread, fresh: inout [TimelineItem], hydrated: Bool, viewer: Actor
+    ) -> Bool {
+        let before = fresh.count
+        fresh.removeAll { ActivityAnalysis.requestsReview(of: viewer, $0) }
+        if fresh.isEmpty, before > 0 { return false }
+        if !row.involvement.isDisjoint(with: .ownWork) { return true }
+        guard hydrated else { return row.thread.reason == .mention }
+        return fresh.contains { ActivityAnalysis.mentions(viewer, in: $0.payload) }
     }
 
     private nonisolated static func fetchDetail(
@@ -786,7 +804,7 @@ public final class InboxStore {
 
     private func publishMorningSummary() {
         let repos = Dictionary(uniqueKeysWithValues: collected.groupIDs.compactMap { id -> (ThreadID, RepoRef)? in
-            guard let row = rows[id], settings.presents(row.thread) else { return nil }
+            guard let row = rows[id], settings.presents(row) else { return nil }
             return (id, row.thread.repo)
         })
         let summary = collected.morningSummary(repo: { repos[$0] })
@@ -832,7 +850,7 @@ public final class InboxStore {
     }
 
     private func rebuildGroups() {
-        let next = rows.values.filter { settings.presents($0.thread) }.map(\.group).sorted { a, b in
+        let next = rows.values.filter { settings.presents($0) }.map(\.group).sorted { a, b in
             a.lastActivityAt != b.lastActivityAt ? a.lastActivityAt > b.lastActivityAt : a.id.rawValue < b.id.rawValue
         }
         if next != groups { groups = next }

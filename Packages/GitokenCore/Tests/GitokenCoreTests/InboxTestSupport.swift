@@ -59,6 +59,8 @@ final class ScriptedGitHub: GitHubService {
         var viewer: Result<Actor, GitHubError> = .success(me)
         var listing: [ThreadID: NotificationThread] = [:]
         var timelines: [ThreadID: [TimelineItem]] = [:]
+        /// PR/issue author per thread; sarah when unset.
+        var authors: [ThreadID: Actor] = [:]
         var version = 0
         var pollError: GitHubError?
         var detailErrors: [ThreadID: GitHubError] = [:]
@@ -129,7 +131,7 @@ final class ScriptedGitHub: GitHubService {
             s.detailCalls.append(thread.id)
             if let error = s.detailErrors[thread.id] { return .failure(error) }
             return .success(ThreadDetail(
-                threadID: thread.id, title: thread.title, state: .open, author: sarah, htmlURL: thread.htmlURL,
+                threadID: thread.id, title: thread.title, state: .open, author: s.authors[thread.id] ?? sarah, htmlURL: thread.htmlURL,
                 items: s.timelines[thread.id] ?? [], checks: nil, fetchedAt: now))
         }
         return try result.get()
